@@ -1,6 +1,7 @@
-// `agent-handoff setup`: choose a sandbox provider, store keys, register the
-// MCP server with the agents installed on this machine, and install the handoff
-// skill. The prompts and flow follow `npx skills add` (vercel-labs/skills).
+// `agent-handoff setup`: choose a sandbox provider and the agents that can run
+// there, store only the keys those agents need, register the MCP server with the
+// agents installed on this machine, and install the handoff skill. The prompts
+// and flow follow `npx skills add` (vercel-labs/skills).
 import { execFile } from "node:child_process";
 import { cpSync, existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -8,7 +9,6 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify, styleText } from "node:util";
 import * as p from "@clack/prompts";
-import { REMOTE_AGENT_NAMES } from "./agents/remote.js";
 import { type HandoffConfig, loadConfig, loadEnv, saveConfig, saveSecrets, secretsPath } from "./config.js";
 
 const execFileAsync = promisify(execFile);
@@ -34,9 +34,55 @@ const PROVIDERS: ProviderChoice[] = [
   { name: "prime", summary: "Prime Intellect sandboxes with SSH. Needs uv installed.", keys: ["PRIME_API_KEY"] },
 ];
 
-const MODEL_KEYS = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"];
+// Agents that can continue the work in the sandbox. Names match REMOTE_AGENTS
+// in agents/remote.ts. Any one key in `keys` is enough for the agent to run.
+interface CloudAgentChoice {
+  name: string;
+  label: string;
+  keys: { name: string; hint: string }[];
+  // Describes a login on this machine that the handoff reuses, when there is one.
+  existingLogin(): string | undefined;
+}
 
-const SAME_AS_CALLER = "";
+const codexAuthFile = join(process.env.CODEX_HOME?.trim() || join(homedir(), ".codex"), "auth.json");
+
+const CLOUD_AGENTS: CloudAgentChoice[] = [
+  {
+    name: "opencode",
+    label: "OpenCode",
+    keys: [],
+    existingLogin: () => "uses your OpenCode login",
+  },
+  {
+    name: "codex",
+    label: "Codex",
+    keys: [
+      { name: "OPENAI_API_KEY", hint: "OpenAI API key" },
+      { name: "CODEX_API_KEY", hint: "Codex API key" },
+    ],
+    existingLogin: () => (existsSync(codexAuthFile) ? `uses ${codexAuthFile.replace(homedir(), "~")}` : undefined),
+  },
+  {
+    name: "claude",
+    label: "Claude Code",
+    keys: [
+      { name: "CLAUDE_CODE_OAUTH_TOKEN", hint: "subscription token from `claude setup-token`" },
+      { name: "ANTHROPIC_API_KEY", hint: "Anthropic API key" },
+    ],
+    existingLogin: () => undefined,
+  },
+  {
+    name: "pi",
+    label: "Pi",
+    keys: [
+      { name: "ANTHROPIC_API_KEY", hint: "Anthropic API key" },
+      { name: "OPENAI_API_KEY", hint: "OpenAI API key" },
+      { name: "GEMINI_API_KEY", hint: "Gemini API key" },
+      { name: "OPENROUTER_API_KEY", hint: "OpenRouter API key" },
+    ],
+    existingLogin: () => undefined,
+  },
+];
 
 interface AgentRegistration {
   label: string;
@@ -163,26 +209,53 @@ export async function runSetup(): Promise<void> {
     await askKey(key, key === "GITHUB_TOKEN" ? "(needs Contents and Pull requests read and write on your repos. Enter to skip)" : "(Enter to skip)");
   }
 
-  const missingModelKeys = MODEL_KEYS.filter((key) => !env[key]);
-  if (missingModelKeys.length < MODEL_KEYS.length) {
-    p.log.info(`Model keys already set: ${MODEL_KEYS.filter((key) => env[key]).join(", ")}`);
-  }
-  if (missingModelKeys.length > 0) {
-    p.log.step("Model keys for the remote agent. Press Enter to skip any key.");
-    for (const key of missingModelKeys) await askKey(key, "");
-  }
+  // An agent is ready when a login or one of its keys is already available.
+  const readyBy = (agent: CloudAgentChoice) => {
+    const key = agent.keys.find(({ name }) => env[name] || secrets[name]);
+    return agent.existingLogin() ?? (key ? `uses ${key.name}` : undefined);
+  };
+  const needs = (agent: CloudAgentChoice) =>
+    agent.keys.length > 2 ? "needs one model key" : `needs ${agent.keys.map((key) => key.name).join(" or ")}`;
 
-  const targetAgent = answer(
-    await p.select({
-      message: "Default remote agent",
-      options: [
-        { value: SAME_AS_CALLER, label: "Same as the calling agent" },
-        ...REMOTE_AGENT_NAMES.map((name) => ({ value: name, label: name })),
-      ],
-      initialValue: current.targetAgent ?? SAME_AS_CALLER,
+  const cloudAgents = answer(
+    await p.multiselect({
+      message: "Which agents can continue your work in the cloud?",
+      options: CLOUD_AGENTS.map((agent) => ({ value: agent.name, label: agent.label, hint: readyBy(agent) ?? needs(agent) })),
+      initialValues: CLOUD_AGENTS.filter((agent) => readyBy(agent) || agent.name === current.targetAgent).map(
+        (agent) => agent.name,
+      ),
+      required: true,
     }),
   );
-  config.targetAgent = targetAgent || undefined;
+
+  for (const agent of CLOUD_AGENTS.filter((choice) => cloudAgents.includes(choice.name))) {
+    if (readyBy(agent)) continue;
+    // With one key there is nothing to choose; otherwise ask which key the user has.
+    const key =
+      agent.keys.length === 1
+        ? (agent.keys[0] as CloudAgentChoice["keys"][number])
+        : answer(
+            await p.select({
+              message: `${agent.label} key`,
+              options: agent.keys.map((choice) => ({ value: choice, label: choice.name, hint: choice.hint })),
+            }),
+          );
+    await askKey(key.name, "(Enter to skip)");
+  }
+
+  config.targetAgent =
+    cloudAgents.length === 1
+      ? cloudAgents[0]
+      : answer(
+          await p.select({
+            message: "Default cloud agent",
+            options: CLOUD_AGENTS.filter((agent) => cloudAgents.includes(agent.name)).map((agent) => ({
+              value: agent.name,
+              label: agent.label,
+            })),
+            initialValue: cloudAgents.includes(current.targetAgent ?? "") ? current.targetAgent : cloudAgents[0],
+          }),
+        );
 
   const detectSpin = p.spinner();
   detectSpin.start("Detecting installed agents");
@@ -251,7 +324,7 @@ export async function runSetup(): Promise<void> {
   const summary = [
     `Provider: ${provider.name}${config.ssh ? ` (${config.ssh.host})` : ""}`,
     `Keys to save: ${Object.keys(secrets).join(", ") || "none"}`,
-    `Default remote agent: ${config.targetAgent ?? "same as the calling agent"}`,
+    `Cloud agents: ${cloudAgents.map((name) => CLOUD_AGENTS.find((agent) => agent.name === name)?.label).join(", ")} (default ${config.targetAgent})`,
     `MCP server: ${registerAgents.map((name) => agentOf(name).label).join(", ") || "not registered"}`,
     ...(skillTargets.size > 0
       ? [`Handoff skill (${skillScope}):`, ...[...skillTargets].map(([dir, labels]) => `  ${labels.join(", ")}: ${dir}`)]

@@ -58,8 +58,10 @@ It works from any agent that supports MCP and from any editor or terminal.
 
    The wizard uses the same prompts as `npx skills add`. It:
    - asks for a sandbox provider, and checks SSH access when you pick `ssh`;
-   - asks for the provider keys, `GITHUB_TOKEN`, and model keys that are not already set (input is masked, and Enter skips a key);
-   - asks for a default remote agent, or "same as the calling agent";
+   - asks for the provider keys and `GITHUB_TOKEN` that are not already set (input is masked, and Enter skips a key);
+   - asks which agents can continue your work in the cloud: OpenCode, Codex, Claude Code, or Pi;
+   - asks only for the keys those agents need, and skips an agent that already has a login or a key (OpenCode uses your OpenCode login, and Codex uses `~/.codex/auth.json`);
+   - when you pick more than one agent, asks which one is the default. The calling agent can still name another one for a single handoff;
    - detects the agents on your machine and asks which ones get the MCP server;
    - asks which agents get the handoff skill, and whether to install it in the project or globally;
    - shows a summary and asks you to confirm before it writes anything.
