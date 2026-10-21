@@ -56,11 +56,15 @@ It works from any agent that supports MCP and from any editor or terminal.
    node dist/index.js setup
    ```
 
-   The wizard:
-   - asks for a sandbox provider and its keys;
-   - asks for `GITHUB_TOKEN` and model keys that are not already set;
-   - asks for a default remote agent;
-   - offers to register the MCP server and the handoff skill with each agent it finds.
+   The wizard uses the same prompts as `npx skills add`. It:
+   - asks for a sandbox provider, and checks SSH access when you pick `ssh`;
+   - asks for the provider keys, `GITHUB_TOKEN`, and model keys that are not already set (input is masked, and Enter skips a key);
+   - asks for a default remote agent, or "same as the calling agent";
+   - detects the agents on your machine and asks which ones get the MCP server;
+   - asks which agents get the handoff skill, and whether to install it in the project or globally;
+   - shows a summary and asks you to confirm before it writes anything.
+
+   Press Ctrl+C at any prompt to cancel without changing anything. The wizard needs an interactive terminal.
 
 3. Reload your agents so they pick up the server.
 

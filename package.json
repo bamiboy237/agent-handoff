@@ -21,6 +21,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@clack/prompts": "1.8.1",
     "@daytonaio/sdk": "0.225.0",
     "@modelcontextprotocol/sdk": "1.32.1",
     "@vercel/sandbox": "3.8.0",
