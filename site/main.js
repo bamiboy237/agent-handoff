@@ -1,12 +1,24 @@
-// Copy buttons for the install command.
+// Copy the install command. The label blurs between "copy" and "copied".
 for (const button of document.querySelectorAll("[data-copy]")) {
+  const label = button.querySelector(".copy-label");
+  let resetTimer;
+
+  const swap = (text) => {
+    label.classList.add("swapping");
+    setTimeout(() => {
+      label.textContent = text;
+      label.classList.remove("swapping");
+    }, 120);
+  };
+
   button.addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(button.dataset.copy);
-      button.textContent = "copied";
+      swap("copied");
     } catch {
-      button.textContent = "press ⌘C";
+      swap("press ⌘C");
     }
-    setTimeout(() => (button.textContent = "copy"), 1600);
+    clearTimeout(resetTimer);
+    resetTimer = setTimeout(() => swap("copy"), 1600);
   });
 }

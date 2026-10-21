@@ -1,267 +1,91 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" style="color-scheme: dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>agent-handoff</title>
-    <meta
-      name="description"
-      content="Move your local agent session to the cloud. agent-handoff moves your coding agent's task, uncommitted work and all, to a sandbox where the same agent or another one finishes it and opens a pull request."
-    />
+    <meta name="description" content="Hand off your coding agent to the cloud, then close your laptop." />
     <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0c0d0f" />
     <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka-charon-mono@5.3.0/400.css" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka-charon-mono@5.3.0/500.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka-charon-mono@5.3.0/700.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-serif@5.3.0/400-italic.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-serif@5.3.0/500.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-sans@5.3.0/400.css" />
     <link rel="stylesheet" href="styles.css" />
     <script src="main.js" defer></script>
-    <script src="handoff-demo.js" defer></script>
+    <script src="demo.js" defer></script>
   </head>
   <body>
-    <header class="nav container">
-      <a class="brand" href="#" aria-label="agent-handoff home">
-        <img src="assets/logo.svg" width="20" height="20" alt="" />
-        <span>agent-handoff</span>
+    <header class="nav column">
+      <a class="brand" href="./" translate="no">
+        <img src="assets/logo.svg" width="18" height="18" alt="" />agent-handoff
       </a>
-      <nav class="links" aria-label="Primary">
-        <a href="https://github.com/bamiboy237/agent-handoff#readme">Docs</a>
-        <a href="https://github.com/bamiboy237/agent-handoff/commits/main">Changelog</a>
+      <nav aria-label="Primary">
         <a href="https://github.com/bamiboy237/agent-handoff">GitHub</a>
-        <a class="button" href="#install">Install</a>
+        <a class="install-link" href="#install">Install</a>
       </nav>
     </header>
 
     <main>
-      <section class="hero container" id="install">
-        <h1>Move your local agent session to the cloud</h1>
-        <div class="actions">
-          <div class="command">
-            <code>$ npx agent-handoff setup</code>
-            <button class="copy" type="button" data-copy="npx agent-handoff setup">copy</button>
-          </div>
-          <a class="text-link" href="https://github.com/bamiboy237/agent-handoff#readme">Read the docs&nbsp;&nbsp;→</a>
+      <section class="hero column">
+        <h1>Hand off your coding agent to the cloud, then close your laptop.</h1>
+        <div class="command" id="install">
+          <code translate="no"><span class="dollar">$</span> npx github:bamiboy237/agent-handoff setup</code>
+          <button class="copy" type="button" data-copy="npx github:bamiboy237/agent-handoff setup">
+            <span class="copy-label">copy</span>
+          </button>
         </div>
       </section>
 
-      <!-- Hero demo: a Claude Code session hands off, then the sandbox picks it up. -->
-      <section class="demo container" aria-label="A handoff from start to finish">
-        <div class="window" data-demo>
-          <div class="title-bar">
-            <span class="dots" aria-hidden="true">
-              <img src="assets/dot.svg" width="10" height="10" alt="" />
-              <img src="assets/dot.svg" width="10" height="10" alt="" />
-              <img src="assets/dot.svg" width="10" height="10" alt="" />
-            </span>
-            <div class="panes" role="tablist" aria-label="Where the session runs">
-              <button role="tab" id="tab-laptop" aria-controls="pane-laptop" aria-selected="true">laptop&nbsp;&nbsp;·&nbsp;&nbsp;claude</button>
-              <button role="tab" id="tab-sandbox" aria-controls="pane-sandbox" aria-selected="false" tabindex="-1">sandbox h3k9&nbsp;&nbsp;·&nbsp;&nbsp;daytona</button>
-            </div>
-            <button class="replay" type="button" aria-label="Replay the handoff">replay</button>
+      <section class="demo" aria-label="Demo">
+        <p class="sr-only">Claude Code hands a task to OpenCode in a cloud sandbox. OpenCode finishes it with a Codex model, and the same Claude Code session reports the draft pull request.</p>
+        <div class="window" aria-hidden="true">
+          <div class="chrome">
+            <span class="lights"><i></i><i></i><i></i></span>
+            <span class="window-title" data-title translate="no">~/code/billing-api</span>
           </div>
-
-          <div class="pane cc" id="pane-laptop" role="tabpanel" aria-labelledby="tab-laptop">
-            <!-- Scrolls like a terminal: the welcome box moves up as the transcript grows. -->
-            <div class="cc-scroll" data-scroll>
-              <div class="cc-welcome">
-                <p><span class="cc-orange">✻</span> Welcome to <b>Claude Code</b>!</p>
-                <p class="cc-gap"></p>
-                <p class="cc-dim">&nbsp;&nbsp;/help for help, /status for your current setup</p>
-                <p class="cc-gap"></p>
-                <p class="cc-dim">&nbsp;&nbsp;cwd: /Users/you/code/billing-api</p>
-              </div>
-              <div class="cc-transcript" data-transcript aria-live="polite"></div>
-            </div>
-            <div class="cc-input">
-              <span class="cc-prompt">&gt;</span>
-              <span class="cc-typed" data-typed></span><span class="cc-cursor" aria-hidden="true"></span>
-            </div>
-            <p class="cc-hint" data-hint>&nbsp;&nbsp;? for shortcuts</p>
-          </div>
-
-          <div class="pane sandbox" id="pane-sandbox" role="tabpanel" aria-labelledby="tab-sandbox" hidden>
-            <div class="sb-head">
-              <span><b>agent-handoff runner</b>&nbsp;&nbsp;<span class="cc-dim">sandbox h3k9 · daytona · codex</span></span>
-              <span class="sb-timer" data-timer>0.00s</span>
-            </div>
-            <div class="sb-log" data-log aria-live="polite"></div>
+          <div class="screens" data-screens translate="no">
+            <div class="screen" data-screen></div>
           </div>
         </div>
       </section>
 
-      <section class="compat container" aria-labelledby="compat-title">
-        <div class="heading">
-          <h2 id="compat-title">From any agent, on any cloud.</h2>
-          <p class="lede">Start a handoff from any agent that speaks MCP. Pick the agent that finishes it and where it runs.</p>
-        </div>
-        <div class="chip-row">
-          <span class="row-label">from</span>
-          <ul class="chips">
-            <li>OpenCode</li>
-            <li>Claude Code</li>
-            <li>Codex</li>
-            <li>Pi</li>
-            <li>Prime Agent</li>
-            <li>Zed agent</li>
-          </ul>
-        </div>
-        <div class="chip-row">
-          <span class="row-label">on</span>
-          <ul class="chips">
-            <li>Daytona</li>
-            <li>E2B</li>
-            <li>Vercel Sandbox</li>
-            <li>Prime Intellect</li>
-            <li>your own SSH box</li>
-          </ul>
-        </div>
-      </section>
-
-      <section class="how container" aria-labelledby="how-title">
-        <div class="heading">
-          <p class="eyebrow">How it works</p>
-          <h2 id="how-title" class="display">One sentence to your agent.<br />The rest happens on its own.</h2>
-        </div>
-        <ol class="steps">
-          <li>
-            <span class="step-n">01</span>
-            <h3>Prepare</h3>
-            <p>Your agent notices you're leaving and warms a sandbox while you wrap up.</p>
-            <code>handoff_prepare&nbsp;&nbsp;→&nbsp;&nbsp;sandbox warm</code>
-          </li>
-          <li>
-            <span class="step-n">02</span>
-            <h3>Snapshot</h3>
-            <p>Every change, even uncommitted, goes up as one commit. Your working tree stays exactly as it was.</p>
-            <code>temporary git index&nbsp;&nbsp;→&nbsp;&nbsp;handoff/h3k9</code>
-          </li>
-          <li>
-            <span class="step-n">03</span>
-            <h3>Continue</h3>
-            <p>The same agent, or a different one, picks up from a written brief and opens a draft pull request.</p>
-            <code>codex resumes&nbsp;&nbsp;→&nbsp;&nbsp;draft PR #12</code>
-          </li>
-        </ol>
-      </section>
-
-      <section class="feature container">
-        <div class="copy-col">
-          <p class="eyebrow">Mix and match</p>
-          <h2>Start in one agent.<br />Finish in another.</h2>
-          <p class="lede">Your agent writes a brief: the task, what's done, the decisions, and the next step. Any supported agent can pick it up. OpenCode sessions move in full.</p>
-        </div>
-        <div class="panel">
-          <div class="picks">
-            <div class="pick"><span class="pick-label">from</span><span class="pick-value">Claude Code&nbsp;&nbsp;▾</span></div>
-            <span class="pick-arrow" aria-hidden="true">→</span>
-            <div class="pick"><span class="pick-label">to</span><span class="pick-value">Codex&nbsp;&nbsp;▾</span></div>
-          </div>
-          <p class="panel-label">the brief carries</p>
-          <ul class="fields">
-            <li>task</li>
-            <li>done</li>
-            <li>decisions</li>
-            <li>files</li>
-            <li>next step</li>
-            <li>how to verify</li>
-          </ul>
-        </div>
-      </section>
-
-      <section class="feature reverse container">
-        <div class="copy-col">
-          <p class="eyebrow">Bring your own cloud</p>
-          <h2>Your cloud.<br />Your keys.</h2>
-          <p class="lede">Pick a provider during setup, or point it at a machine you already own. Keys reach the sandbox as environment variables. Never git, the brief, or the handoff record.</p>
-        </div>
-        <div class="panel table-panel">
-          <table>
-            <thead>
-              <tr><th scope="col">provider</th><th scope="col">ssh</th><th scope="col">cache</th><th scope="col">notes</th></tr>
-            </thead>
-            <tbody>
-              <tr><th scope="row">Daytona</th><td class="yes">yes</td><td class="yes">yes</td><td>heartbeat keeps it awake</td></tr>
-              <tr><th scope="row">E2B</th><td>—</td><td class="yes">yes</td><td>pauses at its time limit</td></tr>
-              <tr><th scope="row">Vercel Sandbox</th><td>—</td><td>—</td><td>active-CPU billing</td></tr>
-              <tr><th scope="row">Prime Intellect</th><td class="yes">yes</td><td class="yes">yes</td><td>checkpoints</td></tr>
-              <tr><th scope="row">your SSH box</th><td class="yes">yes</td><td>—</td><td>free, already yours</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="feature container">
-        <div class="copy-col">
-          <p class="eyebrow">Pick it back up</p>
-          <h2>Back to you as a<br />pull request.</h2>
-          <p class="lede">When the remote agent finishes, the runner pushes a result branch and opens a draft pull request against your branch. SSH in any time to watch or steer.</p>
-        </div>
-        <div class="panel pr">
-          <p><span class="faint">Draft&nbsp;&nbsp;#12</span>&nbsp;&nbsp;<b>Add multiply and tests</b></p>
-          <p class="body">handoff/h3k9-result&nbsp;&nbsp;→&nbsp;&nbsp;main</p>
-          <p><span class="accent">+48</span>&nbsp;&nbsp;<span class="faint">−2</span>&nbsp;&nbsp;<span class="body">3 files changed</span></p>
-          <ul class="checks">
-            <li>typecheck passed</li>
-            <li>6 tests passed</li>
-            <li>continued by codex in sandbox h3k9</li>
-          </ul>
-          <p class="ssh"><span class="faint">ssh</span>&nbsp;&nbsp;<span class="body">ssh://h3k9@ssh.app.daytona.io/workspace/billing-api</span></p>
-        </div>
-      </section>
-
-      <section class="faq container" aria-labelledby="faq-title">
-        <h2 id="faq-title">Questions</h2>
+      <section class="questions column" aria-labelledby="questions">
+        <h2 id="questions">Questions</h2>
         <dl>
           <div>
-            <dt>What gets moved?</dt>
-            <dd>Committed, staged, unstaged, and new files as one snapshot commit, plus the brief. OpenCode sessions move in full.</dd>
+            <dt>Which agents work?</dt>
+            <dd>OpenCode, Claude Code, Codex, Pi, and any agent that supports MCP.</dd>
           </div>
           <div>
-            <dt>Does my local workspace change?</dt>
-            <dd>No. The snapshot uses a temporary Git index. Your files, index, and branch stay as they are.</dd>
+            <dt>Where does it run?</dt>
+            <dd>Daytona, E2B, Vercel, Prime Intellect, or your own machine over SSH.</dd>
           </div>
           <div>
-            <dt>What do I need?</dt>
-            <dd>Node.js 22, a GitHub token that can push, a model key for the remote agent, and a provider account or an SSH machine.</dd>
+            <dt>What happens to my uncommitted changes?</dt>
+            <dd>They’re copied to the cloud along with your commits, so the agent continues from exactly where you left off.</dd>
           </div>
           <div>
-            <dt>What if my laptop is already closed?</dt>
-            <dd>That's the point. The helper finishes the transfer in the background, and the sandbox keeps going without you.</dd>
+            <dt>How do I get the work back?</dt>
+            <dd>As a draft pull request.</dd>
           </div>
           <div>
-            <dt>Can I watch or steer the remote agent?</dt>
-            <dd>Yes, on providers with SSH. Ask your agent for the handoff status to get the SSH command.</dd>
-          </div>
-          <div>
-            <dt>Is it free?</dt>
-            <dd>agent-handoff is open source. You pay your sandbox provider and model provider, or use your own machine.</dd>
+            <dt>Can I check on it?</dt>
+            <dd>Coming soon.</dd>
           </div>
         </dl>
       </section>
-
-      <section class="closing container">
-        <p class="display-lg">Go. It'll be done when you're back.</p>
-        <div class="actions">
-          <div class="command">
-            <code>$ npx agent-handoff setup</code>
-            <button class="copy" type="button" data-copy="npx agent-handoff setup">copy</button>
-          </div>
-          <a class="text-link" href="https://github.com/bamiboy237/agent-handoff#readme">Read the docs&nbsp;&nbsp;→</a>
-        </div>
-      </section>
     </main>
 
-    <footer class="footer container">
+    <footer class="footer column">
       <div class="footer-links">
-        <span class="footer-brand">agent-handoff</span>
-        <a href="https://github.com/bamiboy237/agent-handoff#readme">Docs</a>
+        <span class="footer-brand" translate="no">agent-handoff</span>
         <a href="https://github.com/bamiboy237/agent-handoff">GitHub</a>
-        <a href="https://github.com/bamiboy237/agent-handoff/commits/main">Changelog</a>
       </div>
-      <span class="legal">MIT&nbsp;&nbsp;·&nbsp;&nbsp;©2026</span>
+      <span>©2026</span>
     </footer>
   </body>
 </html>
