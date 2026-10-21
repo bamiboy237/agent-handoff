@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
-import type { AgentAdapter, AgentCredentials, AgentSession } from "./agent.js";
+import type { LocalAgent, LocalSession } from "./local.js";
+import type { AgentCredentials, RemoteAgent } from "./remote.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -39,29 +40,22 @@ async function api<T>(operation: string, params: Record<string, string> = {}, bo
   return (JSON.parse(output) as { data: T }).data;
 }
 
-export class OpenCodeAgent implements AgentAdapter {
-  readonly name = "opencode";
+interface SessionInfo {
+  id: string;
+  title?: string;
+  location: { directory: string };
+}
 
-  async version(): Promise<string> {
-    const output = await opencode(["--version"]);
-    const match = /\d+\.\d+\.\d+/.exec(output);
-    if (!match) throw new Error(`Could not read the OpenCode version from "${output.trim()}".`);
-    return match[0];
-  }
+function getSession(sessionId: string): Promise<SessionInfo> {
+  return api<SessionInfo>("session.get", { sessionID: sessionId });
+}
 
-  sessionIdFromMeta(meta: Record<string, unknown> | undefined): string | undefined {
-    const value = meta?.[SESSION_META_KEY];
-    return typeof value === "string" ? value : undefined;
-  }
+const openCodeSession: LocalSession = {
+  async directory(sessionId) {
+    return (await getSession(sessionId)).location.directory;
+  },
 
-  async getSession(sessionId: string): Promise<AgentSession> {
-    const info = await api<{ id: string; title?: string; location: { directory: string } }>("session.get", {
-      sessionID: sessionId,
-    });
-    return { id: info.id, directory: info.location.directory, title: info.title };
-  }
-
-  async waitUntilIdle(sessionId: string, timeoutMs: number): Promise<void> {
+  async waitUntilIdle(sessionId, timeoutMs) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       const active = await api<Record<string, unknown>>("session.active");
@@ -69,12 +63,39 @@ export class OpenCodeAgent implements AgentAdapter {
       await sleep(IDLE_POLL_MS);
     }
     throw new Error(`Session ${sessionId} was still running after ${Math.round(timeoutMs / 60000)} minutes.`);
-  }
+  },
 
-  async exportSession(sessionId: string): Promise<string> {
+  async exportSession(sessionId) {
     const output = await opencode(["session", "export", sessionId]);
     JSON.parse(output); // fail here, not in the sandbox, if the export is not JSON
     return output;
+  },
+
+  async markHandedOff(sessionId, handoffId) {
+    const session = await getSession(sessionId);
+    const title = `[cloud ${handoffId}] ${session.title ?? ""}`.trim();
+    await api("session.update", { sessionID: sessionId }, { title });
+  },
+};
+
+// OpenCode is both a local agent that exposes its session and a remote agent
+// that can resume an exported OpenCode session.
+export class OpenCodeAgent implements LocalAgent, RemoteAgent {
+  readonly name = "opencode";
+  readonly session = openCodeSession;
+  readonly resumesSessionOf = "opencode";
+
+  async localVersion(): Promise<string | undefined> {
+    try {
+      return /\d+\.\d+\.\d+/.exec(await opencode(["--version"]))?.[0];
+    } catch {
+      return undefined; // not installed locally; the sandbox installs the latest
+    }
+  }
+
+  sessionIdFromMeta(meta: Record<string, unknown> | undefined): string | undefined {
+    const value = meta?.[SESSION_META_KEY];
+    return typeof value === "string" ? value : undefined;
   }
 
   // Provider keys live in OpenCode's credential store, not in the environment.
@@ -101,11 +122,5 @@ export class OpenCodeAgent implements AgentAdapter {
     }
     env.HANDOFF_OC_INTEGRATIONS = integrations.join(" ");
     return { env, warnings };
-  }
-
-  async markHandedOff(sessionId: string, handoffId: string): Promise<void> {
-    const session = await this.getSession(sessionId);
-    const title = `[cloud ${handoffId}] ${session.title ?? ""}`.trim();
-    await api("session.update", { sessionID: sessionId }, { title });
   }
 }

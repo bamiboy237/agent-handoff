@@ -20,10 +20,30 @@ export const TERMINAL_STATES: ReadonlySet<HandoffState> = new Set([
   "failed",
 ]);
 
+// Written by the calling model. It is the continuation context for every
+// remote agent, and the only context when the native session cannot move.
+export interface HandoffBrief {
+  title: string; // one line; also the pull request title
+  task: string;
+  done?: string;
+  decisions?: string;
+  files?: string[];
+  nextStep: string;
+  verification?: string;
+}
+
+// What a sandbox provider can do. The tools offer only what the provider supports.
+export interface ProviderCapabilities {
+  ssh: boolean;
+  cache: boolean; // can save and start from a reusable snapshot
+  keepAlive: "heartbeat" | "none"; // heartbeat: the runner pings a preview URL while working
+  maxLifetimeMinutes?: number;
+}
+
 export interface SshDetails {
-  command: string;
-  zedCommand: string;
-  expiresAt: string;
+  command: string; // ssh command for a terminal
+  uri?: string; // ssh://user@host[:port]/path for editors that accept one
+  expiresAt?: string;
 }
 
 export interface LogEntry {
@@ -37,9 +57,13 @@ export interface HandoffRecord {
   failedStep?: string;
   error?: string;
 
-  agent: string;
-  sessionId: string;
-  task: string;
+  sourceAgent: string; // the agent that called the tools
+  targetAgent: string; // the agent that continues in the sandbox
+  targetAgentVersion?: string;
+  sessionId?: string; // set only when the source agent identifies its session
+  transferSession: boolean; // move the native session instead of relying on the brief alone
+  snapshotMode: "on_idle" | "immediate";
+  brief: HandoffBrief;
 
   projectDir: string;
   repoName: string;
@@ -55,12 +79,12 @@ export interface HandoffRecord {
   resultBranch: string;
 
   sandboxProvider: string;
+  capabilities: ProviderCapabilities;
   sandboxId?: string;
-  cacheSnapshot: string;
+  cacheSnapshot?: string;
   cacheHit?: boolean;
-  agentVersion: string;
   setupCommands: string[];
-  remoteHome?: string;
+  remoteRoot?: string; // holds .agent-handoff/ and workspace/ in the sandbox
   remoteDir?: string;
   envKeys: string[]; // names only, for display
   ssh?: SshDetails;

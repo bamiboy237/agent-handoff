@@ -1,22 +1,40 @@
 import { Daytona, type Sandbox } from "@daytonaio/sdk";
-import type { SshDetails } from "../contract.js";
-import type { CreateSandboxOptions, CreatedSandbox, ExecResult, Heartbeat, SandboxAdapter } from "./sandbox.js";
+import type { Env } from "../agents/remote.js";
+import type { ProviderCapabilities, SshDetails } from "../contract.js";
+import type {
+  CreateSandboxOptions,
+  CreatedSandbox,
+  ExecResult,
+  Heartbeat,
+  SandboxAdapter,
+  SandboxState,
+} from "./sandbox.js";
 
 const CREATE_TIMEOUT_SECONDS = 300;
 const SNAPSHOT_TIMEOUT_SECONDS = 900;
+const AUTO_STOP_MINUTES = 30;
+const SSH_MINUTES = 24 * 60;
 
 export class DaytonaSandboxes implements SandboxAdapter {
   readonly name = "daytona";
+  readonly capabilities: ProviderCapabilities = { ssh: true, cache: true, keepAlive: "heartbeat" };
   private client?: Daytona;
 
+  constructor(private readonly env: Env) {}
+
   preflight(): string | undefined {
-    if (process.env.DAYTONA_API_KEY || process.env.DAYTONA_JWT_TOKEN) return undefined;
-    return "DAYTONA_API_KEY is not set in the environment of the agent-handoff MCP server.";
+    if (this.env.DAYTONA_API_KEY || this.env.DAYTONA_JWT_TOKEN) return undefined;
+    return "DAYTONA_API_KEY is not set. Run `agent-handoff setup` or add it to the agent-handoff secrets file.";
   }
 
-  // The SDK reads DAYTONA_API_KEY, DAYTONA_API_URL, and DAYTONA_TARGET from the environment.
   private daytona(): Daytona {
-    this.client ??= new Daytona();
+    this.client ??= new Daytona({
+      apiKey: this.env.DAYTONA_API_KEY,
+      jwtToken: this.env.DAYTONA_JWT_TOKEN,
+      organizationId: this.env.DAYTONA_ORGANIZATION_ID,
+      apiUrl: this.env.DAYTONA_API_URL,
+      target: this.env.DAYTONA_TARGET,
+    });
     return this.client;
   }
 
@@ -36,18 +54,18 @@ export class DaytonaSandboxes implements SandboxAdapter {
   }
 
   async create(options: CreateSandboxOptions): Promise<CreatedSandbox> {
-    const cacheHit = await this.snapshotIsActive(options.cacheSnapshot);
+    const cacheHit = options.cacheSnapshot ? await this.snapshotIsActive(options.cacheSnapshot) : false;
     const sandbox = await this.daytona().create(
       {
         ...(cacheHit ? { snapshot: options.cacheSnapshot } : {}),
         envVars: options.env,
         labels: options.labels,
-        autoStopInterval: options.autoStopMinutes,
+        autoStopInterval: AUTO_STOP_MINUTES,
       },
       { timeout: CREATE_TIMEOUT_SECONDS },
     );
-    const homeDir = (await sandbox.getUserHomeDir()) ?? "/home/daytona";
-    return { id: sandbox.id, cacheHit, homeDir };
+    const root = (await sandbox.getUserHomeDir()) ?? "/home/daytona";
+    return { id: sandbox.id, cacheHit, root };
   }
 
   async exec(sandboxId: string, command: string, timeoutSeconds: number): Promise<ExecResult> {
@@ -80,22 +98,22 @@ export class DaytonaSandboxes implements SandboxAdapter {
     return { url: preview.url, headers: { "X-Daytona-Preview-Token": preview.token } };
   }
 
-  async sshAccess(sandboxId: string, remoteDir: string, minutes: number): Promise<SshDetails> {
+  async sshAccess(sandboxId: string, remoteDir: string): Promise<SshDetails> {
     const sandbox = await this.get(sandboxId);
-    const access = await sandbox.createSshAccess(minutes);
+    const access = await sandbox.createSshAccess(SSH_MINUTES);
     const match = /ssh\s+(?:-p\s+(\d+)\s+)?(\S+@\S+)/.exec(access.sshCommand);
     if (!match) throw new Error(`Unexpected Daytona SSH command "${access.sshCommand}".`);
     const port = match[1] ? `:${match[1]}` : "";
     return {
       command: access.sshCommand,
-      zedCommand: `zed ssh://${match[2]}${port}${remoteDir}`,
+      uri: `ssh://${match[2]}${port}${remoteDir}`,
       expiresAt: new Date(access.expiresAt).toISOString(),
     };
   }
 
-  async state(sandboxId: string): Promise<string> {
-    const sandbox = await this.get(sandboxId);
-    return sandbox.state ?? "unknown";
+  async state(sandboxId: string): Promise<SandboxState> {
+    const state = (await this.get(sandboxId)).state ?? "unknown";
+    return state === "started" ? "running" : state;
   }
 
   async stop(sandboxId: string): Promise<void> {

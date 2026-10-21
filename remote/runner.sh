@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
 # Runs inside the sandbox. The local helper uploads it and calls one phase at a time:
-#   install-agent  install the pinned OpenCode version
+#   install-agent  install the target agent (TARGET_AGENT, pinned to AGENT_VERSION when set)
 #   checkout       clone or fetch the snapshot branch and create the result branch
 #   setup          run the generated setup.sh
-#   run            import the session, continue the task, push, and open a draft PR
-# Secrets arrive as sandbox environment variables. Non-secret settings come from handoff.env.
+#   run            continue the task with the target agent, push, and open a draft PR
+# Secrets arrive as sandbox environment variables, or in secrets.env for providers
+# that cannot set them. Non-secret settings come from handoff.env.
 set -eEuo pipefail
 
-HANDOFF_HOME="$HOME/.agent-handoff"
+HANDOFF_HOME="${HANDOFF_HOME:-$HOME/.agent-handoff}"
 STATE_FILE="$HANDOFF_HOME/state"
 LOG_FILE="$HANDOFF_HOME/runner.log"
-export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.cargo/bin:$PATH"
 export NO_COLOR=1
 mkdir -p "$HANDOFF_HOME"
+if [ -f "$HANDOFF_HOME/secrets.env" ]; then set -a; . "$HANDOFF_HOME/secrets.env"; set +a; fi
 if [ -f "$HANDOFF_HOME/handoff.env" ]; then . "$HANDOFF_HOME/handoff.env"; fi
+TARGET_AGENT="${TARGET_AGENT:-opencode}"
+AGENT_VERSION="${AGENT_VERSION:-}"
 
 PHASE="${1:-}"
 
@@ -29,22 +33,54 @@ json_string() {
 CREDENTIAL_HELPER='!f() { echo username=x-access-token; echo "password=${GITHUB_TOKEN}"; }; f'
 git_auth() { git -c credential.helper= -c credential.helper="$CREDENTIAL_HELPER" "$@"; }
 
-install_agent() {
-  # Check this binary, not the first opencode on PATH: some images ship their own copy.
-  local bin="$HOME/.opencode/bin/opencode"
-  if "$bin" --version 2>/dev/null | grep -q "v$OPENCODE_VERSION\$"; then
-    log "opencode $OPENCODE_VERSION is already installed"
-    return
+# Installs into the user's home when the global npm prefix is not writable, as on a plain SSH host.
+npm_install_global() {
+  if [ -w "$(npm prefix -g)" ]; then
+    npm install -g --no-fund --no-audit "$@" >> "$LOG_FILE" 2>&1
+  else
+    npm install -g --prefix "$HOME/.npm-global" --no-fund --no-audit "$@" >> "$LOG_FILE" 2>&1
   fi
-  log "installing opencode $OPENCODE_VERSION"
+}
+
+# True when the binary exists and, if a version is pinned, reports that version.
+agent_installed() {
+  local version
+  version="$("$1" --version 2>/dev/null)" || return 1
+  [ -z "$AGENT_VERSION" ] || printf '%s' "$version" | grep -q "$AGENT_VERSION"
+}
+
+install_opencode() {
+  # Check this binary, not the first opencode on PATH: some images ship an old OpenCode 1.
+  local bin="$HOME/.opencode/bin/opencode"
+  if "$bin" --version 2>/dev/null | grep -q " v2\." && agent_installed "$bin"; then return; fi
   if ! "$bin" --version 2>/dev/null | grep -q ' v2\.'; then
     # The install script ships OpenCode 1 only. --major moves to the latest OpenCode 2
     # and ignores a requested version, so a second upgrade pins it.
     curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path >> "$LOG_FILE" 2>&1
     "$bin" upgrade --major --method curl >> "$LOG_FILE" 2>&1
   fi
-  "$bin" upgrade "$OPENCODE_VERSION" --method curl >> "$LOG_FILE" 2>&1
-  "$bin" --version | grep -q "v$OPENCODE_VERSION\$"
+  if [ -n "$AGENT_VERSION" ]; then "$bin" upgrade "$AGENT_VERSION" --method curl >> "$LOG_FILE" 2>&1; fi
+  agent_installed "$bin"
+}
+
+install_npm_agent() {
+  local bin="$1" package="$2"
+  shift 2
+  if agent_installed "$bin"; then return; fi
+  npm_install_global "$@" "$package${AGENT_VERSION:+@$AGENT_VERSION}"
+  agent_installed "$bin"
+}
+
+install_agent() {
+  log "installing $TARGET_AGENT ${AGENT_VERSION:-latest}"
+  case "$TARGET_AGENT" in
+    opencode) install_opencode ;;
+    claude) install_npm_agent claude @anthropic-ai/claude-code ;;
+    codex) install_npm_agent codex @openai/codex ;;
+    pi) install_npm_agent pi @earendil-works/pi-coding-agent --ignore-scripts ;;
+    *) log "unknown target agent $TARGET_AGENT"; return 1 ;;
+  esac
+  log "$TARGET_AGENT is ready"
 }
 
 checkout() {
@@ -64,7 +100,7 @@ checkout() {
   git -C "$WORKDIR" config user.email "$GIT_AUTHOR_EMAIL"
 }
 
-start_service() {
+start_opencode_service() {
   if opencode service status >/dev/null 2>&1; then return; fi
   if ! opencode service start >> "$LOG_FILE" 2>&1; then
     # Containers often lack a service manager, so run the service in the background directly.
@@ -78,7 +114,7 @@ start_service() {
   return 1
 }
 
-register_keys() {
+register_opencode_keys() {
   for integration in ${HANDOFF_OC_INTEGRATIONS:-}; do
     local name key
     name="HANDOFF_OC_KEY_$(printf '%s' "$integration" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9' '_')"
@@ -99,7 +135,7 @@ register_keys() {
   done
 }
 
-import_session() {
+import_opencode_session() {
   if opencode api session.get --param "sessionID=$SESSION_ID" > /dev/null 2>&1; then
     log "session $SESSION_ID is already imported"
     return
@@ -112,9 +148,44 @@ import_session() {
   fi
 }
 
-# Daytona auto-stop ignores processes inside the sandbox. Preview requests reset
-# the idle timer, so ping a tiny listener through the preview URL while working.
+# Every headless run closes stdin: with a non-TTY stdin, several agents wait for
+# piped input before sending the prompt, and a provider's session pipe never reaches EOF.
+run_opencode() {
+  start_opencode_service
+  register_opencode_keys
+  if [ -f "$HANDOFF_HOME/session.json" ]; then
+    import_opencode_session
+    opencode run --session "$SESSION_ID" --auto "$1" < /dev/null
+  else
+    opencode run --auto "$1" < /dev/null
+  fi
+}
+
+run_claude() {
+  # Claude Code refuses to skip permissions as root unless it is told it runs in a sandbox.
+  IS_SANDBOX=1 claude -p --dangerously-skip-permissions "$1" < /dev/null
+}
+
+run_codex() {
+  if [ -n "${HANDOFF_CODEX_AUTH_JSON:-}" ] && [ ! -f "$HOME/.codex/auth.json" ]; then
+    mkdir -p "$HOME/.codex"
+    printf '%s' "$HANDOFF_CODEX_AUTH_JSON" | base64 -d > "$HOME/.codex/auth.json"
+    chmod 600 "$HOME/.codex/auth.json"
+    grep -qs cli_auth_credentials_store "$HOME/.codex/config.toml" ||
+      printf 'cli_auth_credentials_store = "file"\n' >> "$HOME/.codex/config.toml"
+  fi
+  codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check "$1" < /dev/null
+}
+
+run_pi() {
+  pi -p "$1" < /dev/null
+}
+
+# Providers that stop idle sandboxes even while processes run (Daytona) get a
+# preview URL. Pinging a tiny listener through it keeps the sandbox awake.
 start_heartbeat() {
+  HEARTBEAT_PID=""
+  if [ -z "${HEARTBEAT_URL:-}" ]; then return; fi
   mkdir -p "$HANDOFF_HOME/heartbeat"
   if command -v python3 > /dev/null; then
     nohup python3 -m http.server "$HEARTBEAT_PORT" --directory "$HANDOFF_HOME/heartbeat" > /dev/null 2>&1 &
@@ -138,10 +209,10 @@ create_draft_pr() {
     return
   fi
   local title body status
-  title="agent-handoff: $(head -n 1 "$HANDOFF_HOME/task.txt")"
-  body="Continued in a cloud sandbox by agent-handoff (handoff $HANDOFF_ID).
+  title="$(head -n 1 "$HANDOFF_HOME/title.txt")"
+  body="Continued in a cloud sandbox by $TARGET_AGENT through agent-handoff (handoff $HANDOFF_ID).
 
-$(cat "$HANDOFF_HOME/task.txt")"
+$(cat "$HANDOFF_HOME/brief.md")"
   status="$(curl -sS -o "$HANDOFF_HOME/pr.json" -w '%{http_code}' -X POST \
     -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
     "https://api.github.com/repos/$GITHUB_REPO/pulls" \
@@ -168,18 +239,14 @@ publish_result() {
 run_agent() {
   set_state running
   start_heartbeat
-  start_service
-  register_keys
-  import_session
-  local status=0
-  # stdin must be closed: with a non-TTY stdin, opencode run waits for piped input
-  # before sending the prompt, and the Daytona session pipe never reaches EOF.
-  (cd "$WORKDIR" && opencode run --session "$SESSION_ID" --auto "$(cat "$HANDOFF_HOME/prompt.txt")" < /dev/null) >> "$LOG_FILE" 2>&1 || status=$?
-  kill "$HEARTBEAT_PID" 2>/dev/null || true
+  local status=0 prompt
+  prompt="$(cat "$HANDOFF_HOME/prompt.txt")"
+  (cd "$WORKDIR" && "run_$TARGET_AGENT" "$prompt") >> "$LOG_FILE" 2>&1 || status=$?
+  if [ -n "$HEARTBEAT_PID" ]; then kill "$HEARTBEAT_PID" 2>/dev/null || true; fi
   # Push even after a failed run, so partial work is never stranded in the sandbox.
   publish_result
   if [ "$status" -ne 0 ]; then
-    log "opencode run exited with $status"
+    log "$TARGET_AGENT exited with $status"
     set_state "failed:agent"
     exit "$status"
   fi

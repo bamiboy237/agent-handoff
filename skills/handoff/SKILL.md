@@ -1,13 +1,14 @@
 ---
 name: handoff
-description: Move the current OpenCode session and all local changes to a cloud sandbox so the task keeps running after the user disconnects. Use when the user wants work to continue without their machine, for example "move this to the cloud", "keep going while I'm away", "I need to close my laptop, finish this", or "run this remotely". Do not use for deploying an app or running a single remote command.
+description: Move the current task and all local changes to a cloud sandbox so it keeps running after the user disconnects, optionally continued by a different agent. Use when the user wants work to continue without their machine, for example "move this to the cloud", "keep going while I'm away", "I need to close my laptop, finish this", "run this remotely", or "let Codex finish this in the cloud". Do not use for deploying an app or running a single remote command.
 ---
 
 # Cloud handoff
 
-The agent-handoff MCP server moves this session to a Daytona sandbox. The
-task continues there after the user's machine disconnects. The user does
-not need a special phrase. Infer the intent from what they say.
+The agent-handoff MCP server moves this task to a cloud sandbox or the
+user's own SSH machine. The task continues there after the user's machine
+disconnects. The user does not need a special phrase. Infer the intent
+from what they say.
 
 ## When handoff fits
 
@@ -21,29 +22,41 @@ or their machine. Typical signals:
 Ask one short question first when the intent is unclear. Do not hand off
 for deploys, one-off remote commands, or questions about cloud services.
 
+## Write the brief
+
+The brief is often the only context the next agent gets. Write it for an
+agent that has never seen this conversation.
+
+- `title`: one line naming the work. It becomes the pull request title.
+- `task`: the goal and any constraints the user gave.
+- `done`: what is already finished, including uncommitted edits.
+- `decisions`: choices made and why, so the next agent does not undo them.
+- `files`: the files that matter for the next step.
+- `nextStep`: the exact next action.
+- `verification`: how to check the work, such as the test command.
+
 ## Steps
 
-1. Call `handoff_prepare` as soon as you notice the intent.
-   - Pass `task`: what you are doing, what is done, and the exact next step.
-     Write it for a fresh agent with no other context.
+1. Call `handoff_prepare` with the brief as soon as you notice the intent.
+   - Pass `targetAgent` only when the user names an agent to continue the
+     work, such as `codex` or `claude`.
    - Preparation warms the sandbox in the background. Keep working while it runs.
-2. Read the result. Tell the user about each warning, such as a missing
-   `GITHUB_TOKEN` or files that the snapshot branch would include.
+2. Read the result. Tell the user about each warning, such as a missing key,
+   a short sandbox time limit, or files the snapshot branch would include.
 3. When the user is ready to move, call `handoff_start` with the `handoffId`.
-   - Pass an updated `task` if the work moved on since step 1.
+   - Pass an updated `brief` if the work moved on since step 1.
    - If the user wants to move right away, skip step 1. Call
-     `handoff_start` with only `task`.
+     `handoff_start` with only the `brief`.
 4. End your turn immediately after `handoff_start`.
-   - Write one short message saying the session is moving to the cloud.
-   - Do not call more tools. Do not edit files.
-   - The transfer waits for your turn to end, so any later edit is lost
-     or splits the work.
+   - Write one short message saying the task is moving to the cloud.
+   - Do not call more tools. Do not edit files. Later edits are not transferred.
 
 ## After the handoff
 
-- The remote session owns the task. Treat this local session as read-only.
+- The remote agent owns the task. Treat this local session as read-only.
 - Call `handoff_status` when the user asks about progress. It returns the
-  state, the remote log, the draft pull request, and the SSH and Zed details.
-- Give the user the `zed ssh://...` command from `handoff_status` when they
-  want to open the remote workspace.
+  state, the remote log, the draft pull request, and SSH details when the
+  provider supports SSH.
+- Give the user the SSH command or editor URI from `handoff_status` when
+  they want to open the remote workspace.
 - Call `handoff_stop` only when the user asks to stop the remote work.

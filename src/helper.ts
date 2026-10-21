@@ -1,23 +1,25 @@
 // Detached helper for one handoff. It outlives the MCP tool call so the
-// agent can end its turn before the session is exported.
+// agent can end its turn before the work is captured.
 //
-//   warm -> wait for handoff_start -> wait for idle -> snapshot and export
-//   -> checkout and setup -> cache snapshot -> start the remote runner
-import { existsSync, readFileSync } from "node:fs";
+//   warm -> wait for handoff_start -> wait for idle (when the session is known)
+//   -> push the snapshot -> checkout and setup -> cache (when supported)
+//   -> start the remote runner
+import { readFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
-import { agentAdapter } from "./agents/agent.js";
+import { localAgentByName } from "./agents/local.js";
+import { remoteAgent } from "./agents/remote.js";
+import { continuationPrompt, renderBrief } from "./brief.js";
+import { loadConfig, loadEnv } from "./config.js";
 import type { HandoffRecord, HandoffState } from "./contract.js";
 import { collectSandboxEnv } from "./credentials.js";
 import { createSnapshotCommit, pushSnapshot } from "./git-snapshot.js";
 import { sandboxAdapter } from "./sandboxes/sandbox.js";
 import { RUNNER_SCRIPT, renderSetupScript } from "./setup.js";
-import { appendLog, startSignalPath, updateRecord } from "./store.js";
+import { type StartSignal, appendLog, readStartSignal, updateRecord } from "./store.js";
 
 const START_WAIT_MS = 20 * 60_000;
 const START_POLL_MS = 500;
 const IDLE_TIMEOUT_MS = 30 * 60_000;
-const AUTO_STOP_MINUTES = 30;
-const SSH_MINUTES = 24 * 60;
 const HEARTBEAT_PORT = 7979;
 
 class StepError extends Error {
@@ -40,24 +42,11 @@ function renderEnvFile(values: Record<string, string>): string {
     .concat("\n");
 }
 
-function continuationPrompt(record: HandoffRecord): string {
-  return [
-    `agent-handoff moved this session from the user's machine to a cloud sandbox (handoff ${record.id}).`,
-    `The repository is at ${record.remoteDir} on branch ${record.resultBranch}. It includes every local change, including uncommitted work.`,
-    "The user may be offline. Do not wait for answers. Make reasonable decisions and note them in your commit messages.",
-    "",
-    "Continue this task:",
-    record.task,
-    "",
-    "Commit your work as you go. When the task is done, stop. The runner pushes the branch and opens a draft pull request.",
-  ].join("\n");
-}
-
-async function waitForStartSignal(id: string): Promise<{ task?: string } | undefined> {
+async function waitForStartSignal(id: string): Promise<StartSignal | undefined> {
   const deadline = Date.now() + START_WAIT_MS;
-  const path = startSignalPath(id);
   while (Date.now() < deadline) {
-    if (existsSync(path)) return JSON.parse(readFileSync(path, "utf8")) as { task?: string };
+    const signal = readStartSignal(id);
+    if (signal) return signal;
     await sleep(START_POLL_MS);
   }
   return undefined;
@@ -67,8 +56,9 @@ async function run(id: string): Promise<void> {
   let record = updateRecord(id, (r) => {
     r.helperPid = process.pid;
   });
-  const agent = agentAdapter(record.agent);
-  const sandboxes = sandboxAdapter(record.sandboxProvider);
+  const local = localAgentByName(record.sourceAgent);
+  const remote = remoteAgent(record.targetAgent);
+  const sandboxes = sandboxAdapter({ ...loadConfig(), provider: record.sandboxProvider }, loadEnv());
 
   const progress = (message: string, state?: HandoffState, change?: (r: HandoffRecord) => void) => {
     record = updateRecord(id, (r) => {
@@ -87,29 +77,32 @@ async function run(id: string): Promise<void> {
     }
   };
 
-  const runPhase = (phase: string, timeoutSeconds: number, env: Record<string, string> = {}) =>
+  const handoffDir = () => `${record.remoteRoot}/.agent-handoff`;
+
+  const runnerCommand = (phase: string) =>
+    ["env", `HANDOFF_HOME=${shellQuote(handoffDir())}`, "bash", shellQuote(`${handoffDir()}/runner.sh`), phase].join(" ");
+
+  const runPhase = (phase: string, timeoutSeconds: number) =>
     step(phase, async () => {
-      const assignments = Object.entries(env).map(([key, value]) => `${key}=${shellQuote(value)}`);
-      const command = ["env", ...assignments, "bash", `${record.remoteHome}/.agent-handoff/runner.sh`, phase].join(" ");
-      const result = await sandboxes.exec(record.sandboxId!, `bash -c ${shellQuote(command)}`, timeoutSeconds);
+      const result = await sandboxes.exec(record.sandboxId!, `bash -c ${shellQuote(runnerCommand(phase))}`, timeoutSeconds);
       if (result.exitCode !== 0) {
         throw new Error(`runner.sh ${phase} exited with ${result.exitCode}: ${result.output.slice(-1500)}`);
       }
     });
 
-  const upload = (name: string, content: string) =>
-    sandboxes.upload(record.sandboxId!, content, `${record.remoteHome}/.agent-handoff/${name}`);
+  const upload = (name: string, content: string) => sandboxes.upload(record.sandboxId!, content, `${handoffDir()}/${name}`);
 
   const handoffEnv = (extra: Record<string, string> = {}) =>
     renderEnvFile({
       HANDOFF_ID: record.id,
-      OPENCODE_VERSION: record.agentVersion,
+      TARGET_AGENT: record.targetAgent,
+      AGENT_VERSION: record.targetAgentVersion ?? "",
       REPO_URL: record.cloneUrl,
       SNAPSHOT_BRANCH: record.snapshotBranch,
       RESULT_BRANCH: record.resultBranch,
       BASE_BRANCH: record.baseBranch,
       WORKDIR: record.remoteDir!,
-      SESSION_ID: record.sessionId,
+      SESSION_ID: record.sessionId ?? "",
       GITHUB_REPO: record.githubRepo ?? "",
       GIT_AUTHOR_NAME: record.gitAuthorName,
       GIT_AUTHOR_EMAIL: record.gitAuthorEmail,
@@ -119,26 +112,27 @@ async function run(id: string): Promise<void> {
   // 1. Warm the sandbox while the local agent keeps working.
   if (!record.sandboxId) {
     const created = await step("create_sandbox", async () => {
-      const { env } = await collectSandboxEnv(record.projectDir, agent);
+      const { env } = await collectSandboxEnv(record.projectDir, remote, loadEnv());
       return sandboxes.create({
+        handoffId: record.id,
         cacheSnapshot: record.cacheSnapshot,
         env,
         labels: { "agent-handoff": record.id },
-        autoStopMinutes: AUTO_STOP_MINUTES,
       });
     });
     progress(`Created sandbox ${created.id}${created.cacheHit ? " from the cached snapshot" : ""}.`, undefined, (r) => {
       r.sandboxId = created.id;
       r.cacheHit = created.cacheHit;
-      r.remoteHome = created.homeDir;
-      r.remoteDir = `${created.homeDir}/workspace/${r.repoName}`;
+      r.remoteRoot = created.root;
+      r.remoteDir = `${created.root}/workspace/${r.repoName}`;
     });
     await step("upload_runner", async () => {
-      await sandboxes.exec(record.sandboxId!, `mkdir -p ${record.remoteHome}/.agent-handoff`, 30);
+      await sandboxes.exec(record.sandboxId!, `mkdir -p ${shellQuote(handoffDir())}`, 30);
       await upload("runner.sh", readFileSync(RUNNER_SCRIPT, "utf8"));
+      await upload("handoff.env", handoffEnv());
     });
-    await runPhase("install-agent", 900, { OPENCODE_VERSION: record.agentVersion });
-    progress(`Sandbox is warm with OpenCode ${record.agentVersion}.`, "warm");
+    await runPhase("install-agent", 900);
+    progress(`Sandbox is warm with ${record.targetAgent} ${record.targetAgentVersion ?? "(latest)"}.`, "warm");
   }
 
   // 2. Wait for handoff_start. Delete the sandbox if it never comes.
@@ -148,23 +142,32 @@ async function run(id: string): Promise<void> {
     progress("handoff_start was not called within 20 minutes. Deleted the warm sandbox.", "abandoned");
     return;
   }
-  progress("Start requested. Waiting for the local turn to end.", "waiting_for_idle", (r) => {
+  progress("Start requested.", undefined, (r) => {
     r.startRequested = true;
-    if (signal.task) r.task = signal.task;
+    if (signal.brief) r.brief = signal.brief;
   });
 
-  // 3. Capture the finished turn and the files on disk.
-  await step("wait_for_idle", () => agent.waitUntilIdle(record.sessionId, IDLE_TIMEOUT_MS));
-  progress("Local session is idle. Creating the snapshot commit.", "transferring");
-  const snapshotCommit = await step("snapshot", () => createSnapshotCommit(record.projectDir, record.id));
+  // 3. Capture the work. A known session is captured once its turn ends;
+  //    otherwise handoff_start already took the snapshot at call time.
+  let snapshotCommit = signal.snapshotCommit;
+  if (record.snapshotMode === "on_idle" && record.sessionId && local.session) {
+    progress("Waiting for the local turn to end.", "waiting_for_idle");
+    await step("wait_for_idle", () => local.session!.waitUntilIdle(record.sessionId!, IDLE_TIMEOUT_MS));
+    snapshotCommit = await step("snapshot", () => createSnapshotCommit(record.projectDir, record.id));
+  }
+  if (!snapshotCommit) throw new StepError("snapshot", new Error("No snapshot commit was taken."));
+  progress("Pushing the snapshot commit.", "transferring");
   await step("push_snapshot", () => pushSnapshot(record.projectDir, snapshotCommit, record.snapshotBranch));
   progress(`Pushed ${snapshotCommit.slice(0, 12)} to ${record.snapshotBranch}.`, undefined, (r) => {
     r.snapshotCommit = snapshotCommit;
   });
-  const sessionExport = await step("export_session", () => agent.exportSession(record.sessionId));
+  const sessionExport =
+    record.transferSession && record.sessionId && local.session
+      ? await step("export_session", () => local.session!.exportSession(record.sessionId!))
+      : undefined;
 
-  // 4. Restore the project. The session is uploaded after the cache snapshot
-  //    so transcripts never end up in a reusable image.
+  // 4. Restore the project. Private files are uploaded after the cache snapshot
+  //    so transcripts and tokens never end up in a reusable image.
   progress("Restoring the project in the sandbox.", "setting_up");
   await step("upload_config", async () => {
     await upload("handoff.env", handoffEnv());
@@ -172,7 +175,7 @@ async function run(id: string): Promise<void> {
   });
   await runPhase("checkout", 900);
   await runPhase("setup", 3600);
-  if (!record.cacheHit) {
+  if (record.cacheSnapshot && !record.cacheHit && sandboxes.saveCache) {
     try {
       await sandboxes.saveCache(record.sandboxId!, record.cacheSnapshot);
       progress(`Saved cache snapshot ${record.cacheSnapshot} for later handoffs.`);
@@ -181,30 +184,39 @@ async function run(id: string): Promise<void> {
     }
   }
 
-  // 5. Start the remote session in the background.
+  // 5. Start the remote agent in the background.
   await step("start_remote", async () => {
-    const heartbeat = await sandboxes.heartbeat(record.sandboxId!, HEARTBEAT_PORT);
+    const heartbeat = sandboxes.heartbeat ? await sandboxes.heartbeat(record.sandboxId!, HEARTBEAT_PORT) : undefined;
     await upload(
       "handoff.env",
-      handoffEnv({
-        HEARTBEAT_PORT: String(HEARTBEAT_PORT),
-        HEARTBEAT_URL: heartbeat.url,
-        HEARTBEAT_TOKEN: heartbeat.headers["X-Daytona-Preview-Token"] ?? "",
-      }),
+      handoffEnv(
+        heartbeat
+          ? {
+              HEARTBEAT_PORT: String(HEARTBEAT_PORT),
+              HEARTBEAT_URL: heartbeat.url,
+              HEARTBEAT_TOKEN: Object.values(heartbeat.headers)[0] ?? "",
+            }
+          : {},
+      ),
     );
-    await upload("session.json", sessionExport);
-    await upload("task.txt", record.task);
+    if (sessionExport) await upload("session.json", sessionExport);
+    await upload("title.txt", record.brief.title);
+    await upload("brief.md", renderBrief(record.brief));
     await upload("prompt.txt", continuationPrompt(record));
-    await sandboxes.startBackground(record.sandboxId!, "agent-handoff", `bash ${record.remoteHome}/.agent-handoff/runner.sh run`);
+    await sandboxes.startBackground(record.sandboxId!, "agent-handoff", runnerCommand("run"));
   });
-  const ssh = await step("ssh_access", () => sandboxes.sshAccess(record.sandboxId!, record.remoteDir!, SSH_MINUTES));
+  const ssh = sandboxes.sshAccess
+    ? await step("ssh_access", () => sandboxes.sshAccess!(record.sandboxId!, record.remoteDir!))
+    : undefined;
 
-  try {
-    await agent.markHandedOff(record.sessionId, record.id);
-  } catch (error) {
-    progress(`Could not retitle the local session: ${error instanceof Error ? error.message : String(error)}`);
+  if (record.sessionId && local.session) {
+    try {
+      await local.session.markHandedOff(record.sessionId, record.id);
+    } catch (error) {
+      progress(`Could not retitle the local session: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
-  progress("Remote session is running. The local session is now read-only by convention.", "running", (r) => {
+  progress(`${record.targetAgent} is running in the sandbox. The local session is now read-only by convention.`, "running", (r) => {
     r.ssh = ssh;
   });
 }

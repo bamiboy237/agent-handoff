@@ -1,7 +1,7 @@
 {
   "name": "agent-handoff",
-  "version": "0.1.0",
-  "description": "Move an active OpenCode session and unfinished work to a Daytona sandbox.",
+  "version": "0.2.0",
+  "description": "Hand off a coding agent task from your machine to a cloud sandbox, with the agent and provider of your choice.",
   "type": "module",
   "license": "MIT",
   "bin": {
@@ -10,7 +10,8 @@
   "files": [
     "dist",
     "remote",
-    "skills"
+    "skills",
+    "bridges"
   ],
   "engines": {
     "node": ">=22"
@@ -22,6 +23,8 @@
   "dependencies": {
     "@daytonaio/sdk": "0.225.0",
     "@modelcontextprotocol/sdk": "1.32.1",
+    "@vercel/sandbox": "3.8.0",
+    "e2b": "2.58.0",
     "zod": "4.6.7"
   },
   "devDependencies": {

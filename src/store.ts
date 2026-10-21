@@ -1,7 +1,7 @@
-import { mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { HandoffRecord, LogEntry } from "./contract.js";
+import type { HandoffBrief, HandoffRecord, LogEntry } from "./contract.js";
 
 const MAX_LOG_ENTRIES = 200;
 
@@ -24,6 +24,20 @@ export function helperLogPath(id: string): string {
 // MCP server never races the helper's own record writes.
 export function startSignalPath(id: string): string {
   return join(stateDir(), `${id}.start`);
+}
+
+export interface StartSignal {
+  brief?: HandoffBrief; // replaces the prepared brief when the work moved on
+  snapshotCommit?: string; // taken at call time when the session cannot be watched
+}
+
+export function readStartSignal(id: string): StartSignal | undefined {
+  const path = startSignalPath(id);
+  return existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as StartSignal) : undefined;
+}
+
+export function writeStartSignal(id: string, signal: StartSignal): void {
+  writeFileSync(startSignalPath(id), JSON.stringify(signal), { mode: 0o600 });
 }
 
 export function readRecord(id: string): HandoffRecord {

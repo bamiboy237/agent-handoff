@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentAdapter } from "./agents/agent.js";
+import type { Env, RemoteAgent } from "./agents/remote.js";
 
 // Later files override earlier ones, matching common dotenv tooling.
 const DOTENV_FILES = [".env", ".env.local"];
@@ -48,7 +48,8 @@ async function checkGithubAccess(token: string, githubRepo: string): Promise<str
 // written to the handoff record, the snapshot commit, or the session export.
 export async function collectSandboxEnv(
   projectDir: string,
-  agent: AgentAdapter,
+  agent: RemoteAgent,
+  localEnv: Env,
   githubRepo?: string,
 ): Promise<SandboxEnv> {
   const warnings: string[] = [];
@@ -59,11 +60,12 @@ export async function collectSandboxEnv(
     if (existsSync(path)) Object.assign(env, parseDotenv(readFileSync(path, "utf8")));
   }
 
-  const agentCredentials = await agent.credentials();
+  // Model keys may live in the agent-handoff secrets file or in the project's .env.
+  const agentCredentials = await agent.credentials({ ...localEnv, ...env });
   Object.assign(env, agentCredentials.env);
   warnings.push(...agentCredentials.warnings);
 
-  const githubToken = process.env.GITHUB_TOKEN || env.GITHUB_TOKEN;
+  const githubToken = localEnv.GITHUB_TOKEN || env.GITHUB_TOKEN;
   if (githubToken) {
     env.GITHUB_TOKEN = githubToken;
     if (githubRepo) {
@@ -73,7 +75,7 @@ export async function collectSandboxEnv(
     }
   } else {
     warnings.push(
-      "GITHUB_TOKEN is not set in your environment or .env file. The sandbox cannot clone a private repository, push the result branch, or open the draft pull request.",
+      "GITHUB_TOKEN is not set in the agent-handoff secrets file, the server environment, or the project .env. The sandbox cannot clone a private repository, push the result branch, or open the draft pull request.",
     );
   }
 
