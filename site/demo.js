@@ -11,7 +11,7 @@ const FOLLOW_UP = "How did the handoff go?";
 const TASK = "Retry failed Stripe webhooks with backoff";
 const PR_URL = "https://github.com/you/billing-api/pull/48";
 const CLAUDE_SPINNER = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
-const HOLD_MS = 2400; // how long a finished scene stays before the next one
+const HOLD_MS = 1600; // how long a finished scene stays before the next one
 const SLOWDOWN = 3.2; // stretches every pause, keystroke, and hold toward real-life pace
 
 const root = document.querySelector(".demo");

@@ -41,7 +41,7 @@
   --cc-green: #4eba65;
   --cc-red: #e06c75;
   --cc-box: #5a5a5a;
-  --term-bg: #0d0f13;
+  --term-bg: #111419;
 
   /* OpenCode's default dark theme, inside the demo only */
   --oc-bg: #1b1b1b;
@@ -58,7 +58,7 @@
   --t-ui: 15px;
   --t-body: 17px;
   --t-h2: 24px;
-  --t-display: clamp(36px, 3.2vw + 18px, 66px);
+  --t-display: clamp(40px, 3.4vw + 22px, 72px);
 
   /* 8px spacing scale */
   --s1: 8px;
@@ -178,7 +178,7 @@ dd {
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--s1);
   font: 400 var(--t-ui) / 1 var(--mono);
 }
 
@@ -233,7 +233,7 @@ dd {
 
 /* Hero */
 .hero {
-  padding: var(--s8) 0 var(--s7);
+  padding: var(--s7) 0 var(--s6);
 }
 
 h1 {
@@ -302,6 +302,12 @@ h1 {
   opacity: 0;
 }
 
+/* The glow behind the demo reaches past the sheet; main clips it so the page never
+   scrolls sideways. Clipping on body would propagate to the viewport instead. */
+main {
+  overflow-x: clip;
+}
+
 /* Demo */
 .demo {
   position: relative;
@@ -314,39 +320,50 @@ h1 {
   position: absolute;
   inset: 120px -10% 80px;
   z-index: -1;
-  background: radial-gradient(50% 50% at 50% 45%, rgba(84, 132, 220, 0.12), transparent 70%);
+  background: radial-gradient(60% 55% at 50% 40%, rgba(84, 132, 220, 0.2), transparent 70%);
   pointer-events: none;
 }
 
 /* The handoff, drawn as a dimension line across the top of the window. */
 .handoff {
   display: grid;
-  grid-template-columns: auto 1fr auto 1fr auto;
+  grid-template-columns: 12px 1fr 12px 1fr 12px;
   align-items: start;
-  margin-bottom: var(--s3);
-  font: 400 var(--t-label) / 1.2 var(--mono);
-  color: var(--ink-3);
+  margin-bottom: var(--s5);
+  padding-bottom: 28px;
+  font: 400 var(--t-label) / 1 var(--mono);
+  color: var(--ink-2);
 }
 
 .node {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
+  position: relative;
 }
 
-.node:first-child {
-  align-items: flex-start;
+/* Labels hang under their nodes as annotations, so they never push the line away. */
+.node span {
+  position: absolute;
+  top: 40px;
+  left: 50%;
+  translate: -50% 0;
+  white-space: nowrap;
 }
 
-.node:last-child {
-  align-items: flex-end;
+.node:first-child span {
+  left: 0;
+  translate: none;
+}
+
+.node:last-child span {
+  left: auto;
+  right: 0;
+  translate: none;
 }
 
 .node i {
-  width: 11px;
-  height: 11px;
-  margin-top: 13px;
+  display: block;
+  width: 12px;
+  height: 12px;
+  margin-top: 16px;
   border: 1px solid var(--rule-strong);
   border-radius: 2px;
   background: var(--ground);
@@ -366,13 +383,13 @@ h1 {
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  padding: 0 var(--s2);
+  padding: 0 4px;
 }
 
 .span em {
   font-style: normal;
-  font-size: 12px;
-  line-height: 12px;
+  font-size: var(--t-label);
+  line-height: 13px;
   transition: color 400ms ease;
 }
 
@@ -381,9 +398,9 @@ h1 {
   position: relative;
   display: block;
   width: 100%;
-  height: 9px;
+  height: 10px;
   overflow: hidden;
-  background: linear-gradient(to right, var(--rule-strong) 50%, transparent 50%) 0 4px / 6px 1px repeat-x;
+  background: linear-gradient(to right, var(--rule-strong) 50%, transparent 50%) 0 4.5px / 6px 1px repeat-x;
 }
 
 .span s {
@@ -397,7 +414,7 @@ h1 {
   content: "";
   position: absolute;
   inset: 4px 0 auto;
-  height: 1px;
+  height: 2px;
   background: var(--accent);
 }
 
@@ -405,7 +422,7 @@ h1 {
 .span s::after {
   content: "";
   position: absolute;
-  top: 1px;
+  top: 1.5px;
   right: 0;
   width: 7px;
   height: 7px;
@@ -469,7 +486,7 @@ h1 {
   position: absolute;
   width: 14px;
   height: 14px;
-  border-color: var(--rule-strong);
+  border-color: rgba(152, 172, 206, 0.38);
   border-style: solid;
   border-width: 0;
   pointer-events: none;
@@ -506,13 +523,15 @@ h1 {
 .window {
   position: relative;
   background: var(--term-bg);
-  border: 1px solid var(--rule-strong);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   overflow: hidden;
   box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.6),
     0 1px 1px rgba(0, 0, 0, 0.5),
-    0 12px 32px -8px rgba(0, 0, 0, 0.6),
-    0 48px 96px -24px rgba(0, 0, 0, 0.75);
+    0 24px 64px -16px rgba(0, 0, 0, 0.8),
+    0 0 120px -20px rgba(84, 132, 220, 0.14);
+  transition: background-color 400ms ease;
 }
 
 /* Ghostty's transparent title bar: it takes the terminal's own background, with
@@ -527,7 +546,7 @@ h1 {
   inset: 0;
   z-index: 1;
   border-radius: inherit;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
   pointer-events: none;
 }
 
@@ -581,12 +600,13 @@ h1 {
   inset: 32px 0 0;
   z-index: 2;
   display: grid;
-  place-items: center;
-  background: rgba(10, 12, 16, 0.5);
+  place-items: start center;
+  padding-top: 136px;
+  background: rgba(10, 12, 16, 0.4);
   transition:
-    opacity 300ms ease,
-    visibility 300ms,
-    background-color 300ms ease;
+    opacity 240ms var(--ease-out),
+    visibility 240ms,
+    background-color 240ms var(--ease-out);
 }
 
 .play-pill {
@@ -620,13 +640,26 @@ h1 {
 
 /* After the story ends, replay sits in the corner so the pull request stays readable. */
 .demo[data-state="ended"] .play {
-  inset: 44px 16px auto auto;
+  inset: 0 8px auto auto;
+  height: 32px;
+  padding-top: 0;
+  place-items: center;
   background: transparent;
+}
+
+.demo[data-state="ended"] .play-pill {
+  gap: 6px;
+  height: 22px;
+  padding: 0 10px;
+  font-size: var(--t-label);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ink);
+  box-shadow: none;
 }
 
 .screens {
   height: 488px;
-  padding: 14px 26px 22px;
+  padding: var(--s2) var(--s3) var(--s3);
   overflow: hidden;
   font: 400 14px/1.55 var(--mono);
   color: var(--cc-text);
@@ -646,6 +679,7 @@ h1 {
   flex-direction: column;
   gap: 14px;
   overflow: hidden;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 24px);
 }
 
 .transcript {
@@ -655,6 +689,7 @@ h1 {
 }
 
 .welcome {
+  margin-top: var(--s1);
   align-self: flex-start;
   min-width: min(480px, 100%);
   padding: 6px 18px 6px 12px;
@@ -728,8 +763,8 @@ u {
 }
 
 .typed {
-  white-space: pre;
-  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .cursor {
@@ -826,8 +861,8 @@ u {
   opacity: 0;
   transform: translateY(4px);
   transition:
-    opacity 420ms var(--ease-out),
-    transform 420ms var(--ease-out);
+    opacity 300ms var(--ease-out),
+    transform 300ms var(--ease-out);
 }
 
 .enter.in {
@@ -852,7 +887,7 @@ h2 {
   display: grid;
   grid-template-columns: 5fr 7fr;
   gap: var(--s1) var(--s4);
-  padding: 20px 0;
+  padding: var(--s3) 0;
   border-top: 1px solid var(--rule);
 }
 
@@ -861,14 +896,14 @@ h2 {
 }
 
 dt {
-  font-size: 16px;
+  font-size: var(--t-body);
   font-weight: 500;
   line-height: 1.5;
 }
 
 dd {
   max-width: 34em;
-  font-size: 16px;
+  font-size: var(--t-body);
   line-height: 1.5;
   color: var(--ink-2);
 }
@@ -906,11 +941,24 @@ dd {
   }
 
   .nav nav {
-    gap: var(--s2);
+    gap: var(--s1);
+  }
+
+  /* Touch targets: every nav and hero control is at least 44px tall on a phone. */
+  .nav nav a:not(.install-link) {
+    display: inline-flex;
+    align-items: center;
+    height: 44px;
+    padding: 0 var(--s1);
+  }
+
+  .install-link,
+  .copy {
+    height: 44px;
   }
 
   .hero {
-    padding: var(--s6) 0 var(--s6);
+    padding: var(--s6) 0 var(--s5);
   }
 
   .demo {
@@ -930,16 +978,24 @@ dd {
     margin-top: var(--s4);
   }
 
+  /* The command wraps instead of hiding its end behind an invisible scroll. */
+  .command {
+    align-items: center;
+  }
+
   .command code {
     font-size: var(--t-label);
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   /* The diagram stands up on a phone: nodes in a column, the line running down. */
   .handoff {
-    grid-template-columns: 11px 1fr;
-    grid-template-rows: auto 40px auto 40px auto;
+    grid-template-columns: 12px 1fr;
+    grid-template-rows: auto 32px auto 32px auto;
     column-gap: var(--s2);
     margin-bottom: var(--s4);
+    padding-bottom: 0;
   }
 
   .node,
@@ -950,11 +1006,15 @@ dd {
 
   .node i {
     grid-column: 1;
-    margin-top: 3px;
+    margin-top: 0;
   }
 
-  .node span {
+  .node span,
+  .node:first-child span,
+  .node:last-child span {
+    position: static;
     grid-column: 2;
+    translate: none;
   }
 
   .span {
@@ -963,7 +1023,7 @@ dd {
     justify-content: flex-end;
     align-items: stretch;
     gap: var(--s2);
-    padding: 6px 0;
+    padding: 4px 0;
   }
 
   .span em {
@@ -971,9 +1031,9 @@ dd {
   }
 
   .span b {
-    width: 11px;
+    width: 12px;
     height: auto;
-    background: linear-gradient(to bottom, var(--rule-strong) 50%, transparent 50%) 5px 0 / 1px 6px repeat-y;
+    background: linear-gradient(to bottom, var(--rule-strong) 50%, transparent 50%) 5.5px 0 / 1px 6px repeat-y;
   }
 
   .span s {
@@ -982,7 +1042,7 @@ dd {
 
   .span s::before {
     inset: 0 auto 0 5px;
-    width: 1px;
+    width: 2px;
     height: auto;
   }
 
@@ -990,7 +1050,7 @@ dd {
     top: auto;
     right: auto;
     bottom: 0;
-    left: 2px;
+    left: 2.5px;
   }
 
   .frame::before,
@@ -1006,9 +1066,17 @@ dd {
   }
 
   .screens {
-    height: 520px;
-    padding: var(--s2);
-    font-size: 12px;
+    height: 460px;
+    padding: var(--s2) 12px;
+    font-size: 11.5px;
+  }
+
+  .oc .transcript > .oc-block {
+    margin-left: var(--s2);
+  }
+
+  .play {
+    padding-top: 96px;
   }
 
   .welcome {

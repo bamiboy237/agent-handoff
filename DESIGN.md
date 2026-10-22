@@ -15,7 +15,7 @@ colors:
 typography:
   display:
     fontFamily: "Archivo, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "clamp(36px, 3.2vw + 18px, 66px)"
+    fontSize: "clamp(40px, 3.4vw + 22px, 72px)"
     fontWeight: 620
     lineHeight: 1.02
     letterSpacing: "-0.035em"
@@ -119,15 +119,15 @@ The page is a technical drawing of one handoff, set on a dark sheet. A drafting 
 ## Layout
 
 - The sheet is 1120px wide, which is twenty 56px grid cells, so its edges land on grid lines. The gutter is 16px.
-- Spacing comes from an 8px scale (`s1` to `s9`). The hero opens with 128px above the headline and 96px below the command. Sections are separated by 128 to 160px on desktop and 96px on phones.
+- Spacing comes from an 8px scale (`s1` to `s9`). The hero opens with 96px above the headline and 64px below the command, so the window's title bar and the Play button sit inside a 1440x900 first viewport. Sections are separated by 128 to 160px on desktop and 96px on phones. `main` clips horizontal overflow, so the glow behind the demo never widens the page.
 - Questions use a two-column grid on desktop (question 5fr, answer 7fr) and stack on phones.
 - At 720px and below, the diagram turns vertical, the crop marks hide, and the window title left-aligns after the traffic lights.
 
 ## Elevation & Depth
 
-- The demo window, the command box, and the play button lift off the sheet with layered shadows: a 1px contact shadow, a 12px to 32px mid shadow, and a deep 48px to 96px ambient shadow for the window.
+- The demo window lifts off the sheet with light, not darkness: a white hairline edge at 10%, a black outer ring, a deep ambient shadow, and a cool blue spill. The command box and the play button use layered contact and mid shadows.
 - Top edges carry a 1px inner highlight (`rgba(255,255,255,0.06–0.08)`).
-- A soft cool radial light sits behind the demo at 12% strength.
+- A soft cool radial light sits behind the demo at 20% strength. The window surface (`#111419`) sits clearly above the ground.
 - Borders are semi-transparent cool rules, never opaque grays.
 
 ## Shapes
@@ -139,9 +139,9 @@ The page is a technical drawing of one handoff, set on a dark sheet. A drafting 
 
 - **Install button:** ink on ground. On hover it turns white. On press it scales to 0.97 over 160ms with ease-out.
 - **Command box:** panel surface with a strong rule, an inner highlight, and a copy button whose label blurs between "copy" and "copied".
-- **Handoff diagram:** `.demo[data-stage]` drives it, and demo.js sets stages 0 to 4. The traveled segment slides in over 2400ms on the strong ease-in-out curve, and a blue head dot marks where the work is right now.
+- **Handoff diagram:** `.demo[data-stage]` drives it, and demo.js sets stages 0 to 4. The node columns are a fixed 12px, so the line meets its nodes the way a dimension line meets its extension lines. Node labels hang underneath in ink-2. The traveled segment is a 2px blue stroke that slides in over 2400ms on the strong ease-in-out curve, and a blue head dot marks where the work is right now.
 - **Demo window:** Ghostty with its transparent title bar. The bar shares the terminal's background, has no divider, and shows colored traffic lights.
-- **Play button:** the window shows a poster frame under a dim scrim until play is pressed. Pressing play starts the story and allows sound. When the story ends, the button becomes Replay in the corner.
+- **Play button:** the window shows a poster frame under a dim scrim until play is pressed, with the pill placed high enough to sit inside the first viewport. Pressing play starts the story and allows sound. When the story ends, the button becomes a small Replay chip in the title bar.
 - **Title block footer:** three cells separated by hairline rules: name, GitHub, year.
 
 ## Do's and Don'ts

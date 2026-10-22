@@ -16,7 +16,7 @@ for (const button of document.querySelectorAll("[data-copy]")) {
       await navigator.clipboard.writeText(button.dataset.copy);
       swap("copied");
     } catch {
-      swap("press ⌘C");
+      swap(/Mac|iPhone|iPad/.test(navigator.platform) ? "press ⌘C" : "press Ctrl+C");
     }
     clearTimeout(resetTimer);
     resetTimer = setTimeout(() => swap("copy"), 1600);
