@@ -6,6 +6,7 @@ import type {
   CreatedSandbox,
   ExecResult,
   Heartbeat,
+  PublicUrl,
   SandboxAdapter,
   SandboxState,
 } from "./sandbox.js";
@@ -14,6 +15,8 @@ const CREATE_TIMEOUT_SECONDS = 300;
 const SNAPSHOT_TIMEOUT_SECONDS = 900;
 const AUTO_STOP_MINUTES = 30;
 const SSH_MINUTES = 24 * 60;
+// Daytona caps signed preview URLs at 24 hours; status checks renew them.
+const PUBLIC_URL_SECONDS = 24 * 60 * 60;
 
 export class DaytonaSandboxes implements SandboxAdapter {
   readonly name = "daytona";
@@ -101,6 +104,14 @@ export class DaytonaSandboxes implements SandboxAdapter {
     const sandbox = await this.get(sandboxId);
     const preview = await sandbox.getPreviewLink(port);
     return { url: preview.url, headers: { "X-Daytona-Preview-Token": preview.token } };
+  }
+
+  // A signed preview URL carries its token, so a phone browser can open it. Daytona
+  // shows a one-time warning page before it, unless the organization turns that off.
+  async publicUrl(sandboxId: string, port: number): Promise<PublicUrl> {
+    const sandbox = await this.get(sandboxId);
+    const signed = await sandbox.getSignedPreviewUrl(port, PUBLIC_URL_SECONDS);
+    return { url: signed.url, expiresAt: new Date(Date.now() + PUBLIC_URL_SECONDS * 1000).toISOString() };
   }
 
   async sshAccess(sandboxId: string, remoteDir: string): Promise<SshDetails> {

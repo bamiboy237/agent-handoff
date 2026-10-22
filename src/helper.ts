@@ -9,13 +9,14 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { localAgentByName } from "./agents/local.js";
 import { remoteAgent } from "./agents/remote.js";
 import { continuationPrompt, renderBrief } from "./brief.js";
+import { OPENCODE_PORT, WATCH_PORT, publishWatchLink } from "./checkin.js";
 import { loadConfig, loadEnv } from "./config.js";
 import type { HandoffRecord, HandoffState } from "./contract.js";
 import { collectSandboxEnv } from "./credentials.js";
 import { createSnapshotCommit, pushSnapshot } from "./git-snapshot.js";
 import { sandboxAdapter } from "./sandboxes/sandbox.js";
-import { RUNNER_SCRIPT, renderSetupScript } from "./setup.js";
-import { type StartSignal, appendLog, readStartSignal, updateRecord } from "./store.js";
+import { RUNNER_SCRIPT, WATCH_SCRIPT, renderSetupScript } from "./setup.js";
+import { type StartSignal, appendLog, readRecord, readStartSignal, updateRecord } from "./store.js";
 
 const START_WAIT_MS = 20 * 60_000;
 const START_POLL_MS = 500;
@@ -107,6 +108,9 @@ async function run(id: string): Promise<void> {
       GITHUB_REPO: record.githubRepo ?? "",
       GIT_AUTHOR_NAME: record.gitAuthorName,
       GIT_AUTHOR_EMAIL: record.gitAuthorEmail,
+      WATCH_PORT: String(WATCH_PORT),
+      WATCH_KEY: record.watchKey ?? "",
+      OPENCODE_PORT: String(OPENCODE_PORT),
       ...extra,
     });
 
@@ -130,10 +134,17 @@ async function run(id: string): Promise<void> {
     await step("upload_runner", async () => {
       await sandboxes.exec(record.sandboxId!, `mkdir -p ${shellQuote(handoffDir())}`, 30);
       await upload("runner.sh", readFileSync(RUNNER_SCRIPT, "utf8"));
+      await upload("watch.mjs", readFileSync(WATCH_SCRIPT, "utf8"));
       await upload("handoff.env", handoffEnv());
     });
     await runPhase("install-agent", 900);
     progress(`Sandbox is warm with ${record.targetAgent} ${record.targetAgentVersion ?? "(latest)"}.`, "warm");
+    // The watch link is ready before handoff_start, so the agent can hand it out at once.
+    try {
+      if ((await publishWatchLink(readRecord(id))).watchUrl) progress("Watch link is ready.");
+    } catch (error) {
+      progress(`Could not create a watch link: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   // 2. Wait for handoff_start. Delete the sandbox if it never comes.

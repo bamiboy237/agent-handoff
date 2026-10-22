@@ -1,7 +1,14 @@
 import type { Sandbox } from "e2b";
 import type { Env } from "../agents/remote.js";
 import type { ProviderCapabilities } from "../contract.js";
-import type { CreateSandboxOptions, CreatedSandbox, ExecResult, SandboxAdapter, SandboxState } from "./sandbox.js";
+import type {
+  CreateSandboxOptions,
+  CreatedSandbox,
+  ExecResult,
+  PublicUrl,
+  SandboxAdapter,
+  SandboxState,
+} from "./sandbox.js";
 
 // The SDK loads on first use, so a server that never touches E2B never pays for it.
 const sdk = () => import("e2b");
@@ -75,6 +82,11 @@ export class E2bSandboxes implements SandboxAdapter {
   async startBackground(sandboxId: string, _name: string, command: string): Promise<void> {
     const sandbox = await this.connect(sandboxId);
     await sandbox.commands.run(command, { background: true, timeoutMs: 0 });
+  }
+
+  // E2B serves every port on a public host. The watch link's key protects it.
+  async publicUrl(sandboxId: string, port: number): Promise<PublicUrl> {
+    return { url: `https://${(await this.connect(sandboxId)).getHost(port)}` };
   }
 
   async saveCache(sandboxId: string, name: string): Promise<void> {

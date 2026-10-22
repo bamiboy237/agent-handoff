@@ -90,6 +90,10 @@ export interface HandoffRecord {
   envKeys: string[]; // names only, for display
   ssh?: SshDetails;
   prUrl?: string;
+  // The watch link: a page in the sandbox for following the agent from any device.
+  watchKey?: string; // secret that the link carries; the page refuses requests without it
+  watchUrl?: string;
+  watchExpiresAt?: string;
 
   helperPid?: number;
   startRequested: boolean;

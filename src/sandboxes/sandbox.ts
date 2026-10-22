@@ -7,6 +7,11 @@ import { PrimeSandboxes } from "./prime.js";
 import { SshHostSandboxes } from "./ssh.js";
 import { VercelSandboxes } from "./vercel.js";
 
+export interface PublicUrl {
+  url: string;
+  expiresAt?: string;
+}
+
 export interface CreateSandboxOptions {
   handoffId: string;
   cacheSnapshot?: string; // used only when the provider supports a cache
@@ -48,6 +53,8 @@ export interface SandboxAdapter {
   // A URL that resets the idle auto-stop timer when requested.
   heartbeat?(sandboxId: string, port: number): Promise<Heartbeat>;
   sshAccess?(sandboxId: string, remoteDir: string): Promise<SshDetails>;
+  // A public HTTPS URL for a port in the sandbox, for the watch link.
+  publicUrl?(sandboxId: string, port: number): Promise<PublicUrl>;
   state(sandboxId: string): Promise<SandboxState>;
   stop(sandboxId: string): Promise<void>;
   remove(sandboxId: string): Promise<void>;

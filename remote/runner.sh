@@ -23,6 +23,10 @@ AGENT_VERSION="${AGENT_VERSION:-}"
 AGENT_MODEL="${AGENT_MODEL:-}"
 # `agent-handoff send` writes messages here; the runner answers them oldest first.
 INBOX="$HANDOFF_HOME/inbox"
+# The watch link (watch.mjs) listens on WATCH_PORT. OpenCode's server gets a fixed
+# port so the watch link can point a public URL at it.
+WATCH_PORT="${WATCH_PORT:-}"
+OPENCODE_PORT="${OPENCODE_PORT:-49374}"
 
 PHASE="${1:-}"
 
@@ -86,6 +90,7 @@ install_agent() {
     *) log "unknown target agent $TARGET_AGENT"; return 1 ;;
   esac
   log "$TARGET_AGENT is ready"
+  start_watch_server
 }
 
 checkout() {
@@ -107,9 +112,10 @@ checkout() {
 
 start_opencode_service() {
   if opencode service status >/dev/null 2>&1; then return; fi
+  opencode service set port "$OPENCODE_PORT" >> "$LOG_FILE" 2>&1 || true
   if ! opencode service start >> "$LOG_FILE" 2>&1; then
     # Containers often lack a service manager, so run the service in the background directly.
-    nohup opencode serve --service >> "$HANDOFF_HOME/serve.log" 2>&1 &
+    nohup opencode serve --service --port "$OPENCODE_PORT" >> "$HANDOFF_HOME/serve.log" 2>&1 &
   fi
   for _ in $(seq 1 60); do
     if opencode service status >/dev/null 2>&1; then return; fi
@@ -239,6 +245,19 @@ answer_messages() {
   done
 }
 
+# Serves the watch link. It needs Node; without it the handoff still runs, with no
+# watch page. Starting it twice is harmless: a running server answers /health.
+start_watch_server() {
+  if [ -z "$WATCH_PORT" ] || [ -z "${WATCH_KEY:-}" ]; then return; fi
+  if ! command -v node > /dev/null; then
+    log "no Node in the sandbox, so there is no watch page"
+    return
+  fi
+  if curl -fsS -o /dev/null -m 2 "http://127.0.0.1:$WATCH_PORT/health"; then return; fi
+  HANDOFF_HOME="$HANDOFF_HOME" WATCH_PORT="$WATCH_PORT" WATCH_KEY="$WATCH_KEY" TARGET_AGENT="$TARGET_AGENT" \
+    OPENCODE_PORT="$OPENCODE_PORT" nohup node "$HANDOFF_HOME/watch.mjs" >> "$HANDOFF_HOME/watch.log" 2>&1 &
+}
+
 # Providers that stop idle sandboxes even while processes run (Daytona) get a
 # preview URL. Pinging a tiny listener through it keeps the sandbox awake.
 start_heartbeat() {
@@ -300,6 +319,7 @@ publish_result() {
 
 run_agent() {
   set_state running
+  start_watch_server
   start_heartbeat
   local status=0 prompt
   prompt="$(cat "$HANDOFF_HOME/prompt.txt")"
@@ -311,6 +331,7 @@ run_agent() {
 # Started by `agent-handoff send` when a message arrives after the run finished.
 resume_agent() {
   set_state running
+  start_watch_server
   start_heartbeat
   local status=0
   answer_messages || status=$?

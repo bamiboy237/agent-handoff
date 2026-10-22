@@ -5,6 +5,7 @@
 //   send [id] <message>  new instructions for the cloud agent
 //   ssh [id]             a shell in the sandbox, in the project folder
 //   attach [id]          OpenCode's live session in your terminal, to watch and steer
+//   watch [id] [--open]  the watch link and its QR code, to follow the agent from any device
 //   stop [id]            stop the cloud agent and its sandbox; pushed branches stay
 // Without an id, each command uses the newest handoff for the current repository.
 import { execFileSync, spawn } from "node:child_process";
@@ -14,12 +15,14 @@ import {
   describe,
   findHandoff,
   openCodeServer,
+  qrCode,
   refreshFromSandbox,
   remoteLog,
   remoteWork,
   sendMessage,
   sshDetails,
   stopHandoff,
+  watchLink,
 } from "./checkin.js";
 
 export const CHECK_IN_COMMANDS = new Set(["status", "work", "logs", "send", "ssh", "attach"]);
@@ -115,6 +118,16 @@ async function logs(id: string | undefined, follow: boolean): Promise<void> {
   }
 }
 
+async function watch(id: string | undefined, open: boolean): Promise<void> {
+  const record = findHandoff(id, currentRepo());
+  const link = await watchLink(record);
+  if (!link) {
+    throw new Error(`Handoff ${record.id} has no watch link. ${record.sandboxProvider} may not offer public URLs, or the sandbox is not ready.`);
+  }
+  console.log(`${qrCode(link)}\n${link}\n\nScan it with your phone, or open the link on any device.`);
+  if (open) await interactive(process.platform === "darwin" ? "open" : "xdg-open", [link]);
+}
+
 async function ssh(id?: string): Promise<number> {
   const record = findHandoff(id, currentRepo());
   const details = await sshDetails(record);
@@ -160,6 +173,7 @@ export async function runCheckIn(command: string, args: string[]): Promise<void>
       console.log(await sendMessage(findHandoff(id, currentRepo()), message));
     } else if (command === "ssh") process.exitCode = await ssh(id);
     else if (command === "attach") process.exitCode = await attach(id);
+    else if (command === "watch") await watch(id, flags.has("--open"));
     else if (command === "stop") console.log(describe(await stopHandoff(findHandoff(id, currentRepo()))));
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

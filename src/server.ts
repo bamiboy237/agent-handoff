@@ -8,7 +8,17 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type LocalAgent, detectLocalAgent } from "./agents/local.js";
 import { REMOTE_AGENT_NAMES, remoteAgent } from "./agents/remote.js";
-import { describe, findHandoff, refreshFromSandbox, remoteWork, sandboxes, sendMessage, stopHandoff } from "./checkin.js";
+import {
+  describe,
+  findHandoff,
+  qrCode,
+  refreshFromSandbox,
+  remoteWork,
+  sandboxes,
+  sendMessage,
+  stopHandoff,
+  watchLink,
+} from "./checkin.js";
 import { loadConfig, loadEnv } from "./config.js";
 import { type HandoffBrief, type HandoffRecord, TERMINAL_STATES } from "./contract.js";
 import { collectSandboxEnv } from "./credentials.js";
@@ -25,6 +35,7 @@ import {
 } from "./store.js";
 
 const HELPER_SCRIPT = fileURLToPath(new URL("./helper.js", import.meta.url));
+const WATCH_LINK_WAIT_MS = 45_000;
 
 // Helpers spawned by this process, so a start right after prepare does not
 // spawn a second helper before the first one records its PID.
@@ -77,6 +88,17 @@ function spawnHelper(id: string): void {
   });
   child.unref();
   if (child.pid) spawnedHelpers.set(id, child.pid);
+}
+
+// The helper publishes the watch link once the sandbox is warm. A handoff started
+// without handoff_prepare waits a little for it, so the user gets the link right away.
+async function waitForWatchLink(id: string): Promise<string | undefined> {
+  const deadline = Date.now() + WATCH_LINK_WAIT_MS;
+  for (;;) {
+    const record = readRecord(id);
+    if (record.watchUrl || record.state === "failed" || Date.now() > deadline) return record.watchUrl;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
 }
 
 // The client's workspace, used to pick the newest handoff for this project.
@@ -189,6 +211,7 @@ async function prepare(
     setupCommands: setup.commands,
     envKeys: Object.keys(env).sort(),
     startRequested: false,
+    watchKey: randomBytes(18).toString("base64url"),
     createdAt: now,
     updatedAt: now,
     log: [],
@@ -272,12 +295,22 @@ export function createServer(): McpServer {
           record.snapshotMode === "immediate" ? await createSnapshotCommit(record.projectDir, record.id) : undefined;
         writeStartSignal(record.id, { brief: handoffId ? brief : undefined, snapshotCommit });
         if (!helperAlive(record)) spawnHelper(record.id);
+        const watch = await waitForWatchLink(record.id);
 
         return reply(
           [
             `Handoff ${record.id} is starting. ${record.targetAgent} continues the work in the sandbox.`,
+            ...(watch
+              ? [
+                  `Watch link: ${watch}`,
+                  "Give the user this link and the QR code below exactly as written. Opening it on any device, such as their phone, shows the cloud agent working live and lets them message it.",
+                  "```",
+                  qrCode(watch),
+                  "```",
+                ]
+              : ["The watch link is not ready yet. handoff_status includes it once the sandbox is up."]),
             ...notes,
-            "End your turn now with one short message telling the user the task is moving to the cloud. Do not call more tools or edit files.",
+            "End your turn now with one short message telling the user the task is moving to the cloud, including the watch link. Do not call more tools or edit files.",
             "In later turns: handoff_status reports progress and SSH details, handoff_work shows the changes so far, and handoff_message sends the cloud agent new instructions.",
           ].join("\n"),
         );
@@ -311,7 +344,9 @@ export function createServer(): McpServer {
         if (!helperAlive(record) && record.sandboxId && (record.state === "running" || record.state === "completed")) {
           ({ record, lines } = await refreshFromSandbox(record));
         }
-        return reply(describe(record, lines));
+        // A stopped sandbox cannot renew its link; the status still reports.
+        await watchLink(record).catch(() => undefined);
+        return reply(describe(readRecord(record.id), lines));
       } catch (error) {
         return reply(`handoff_status failed: ${errorText(error)}`, true);
       }

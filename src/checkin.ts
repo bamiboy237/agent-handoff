@@ -1,8 +1,9 @@
 // Checking in on a handoff after it starts: its status, the agent's work so far,
 // the remote log, messages to the agent, and shell access. The MCP tools and the
 // `agent-handoff` commands share these functions.
+import { renderUnicodeCompact } from "uqr";
 import { loadConfig, loadEnv } from "./config.js";
-import type { HandoffRecord, SshDetails } from "./contract.js";
+import { type HandoffRecord, type SshDetails, TERMINAL_STATES } from "./contract.js";
 import { type SandboxAdapter, sandboxAdapter } from "./sandboxes/sandbox.js";
 import { appendLog, listRecords, readRecord, updateRecord } from "./store.js";
 
@@ -16,6 +17,12 @@ function shellQuote(value: string): string {
 }
 
 const remoteHome = (record: HandoffRecord) => `${record.remoteRoot}/.agent-handoff`;
+
+// Ports inside the sandbox: the watch page, and OpenCode's server (runner.sh pins it).
+export const WATCH_PORT = 7980;
+export const OPENCODE_PORT = 49374;
+// Renews a watch link this long before it expires, so a link you are handed still has time left.
+const WATCH_RENEW_MS = 2 * 60 * 60_000;
 
 // The runner phase command, the same one the helper uses to start the run.
 export const runnerCommand = (record: HandoffRecord, phase: string) =>
@@ -34,6 +41,7 @@ export function describe(record: HandoffRecord, extra: string[] = []): string {
     ...(record.sandboxId ? [`Sandbox: ${record.sandboxProvider} ${record.sandboxId}`] : []),
     ...(record.remoteDir ? [`Remote directory: ${record.remoteDir}`] : []),
     ...(record.prUrl ? [`Draft pull request: ${record.prUrl}`] : []),
+    ...(record.watchUrl ? [`Watch link: ${record.watchUrl}`] : []),
     ...(record.ssh ? [`SSH: ${record.ssh.command}`] : []),
     ...(record.ssh?.uri ? [`Editor URI: ${record.ssh.uri}`] : []),
     ...extra,
@@ -173,6 +181,32 @@ export async function stopHandoff(record: HandoffRecord): Promise<HandoffRecord>
     r.state = "stopped";
     appendLog(r, "Stopped.");
   });
+}
+
+// Makes the watch link public, and tells the watch page its own public address so
+// it can point OpenCode pairing links at itself.
+export async function publishWatchLink(record: HandoffRecord): Promise<HandoffRecord> {
+  const provider = sandboxes(record.sandboxProvider);
+  if (!provider.publicUrl || !record.sandboxId || !record.watchKey) return record;
+  const watch = await provider.publicUrl(record.sandboxId, WATCH_PORT);
+  await provider.upload(record.sandboxId, watch.url.replace(/\/$/, ""), `${remoteHome(record)}/watch-url`);
+  return updateRecord(record.id, (r) => {
+    r.watchUrl = `${watch.url.replace(/\/$/, "")}/?key=${r.watchKey}`;
+    r.watchExpiresAt = watch.expiresAt;
+  });
+}
+
+// The current watch link, renewed when it is close to expiring.
+export async function watchLink(record: HandoffRecord): Promise<string | undefined> {
+  const expiring = record.watchExpiresAt !== undefined && Date.parse(record.watchExpiresAt) - Date.now() < WATCH_RENEW_MS;
+  if (record.watchUrl && !expiring) return record.watchUrl;
+  if (!record.sandboxId || TERMINAL_STATES.has(record.state)) return record.watchUrl;
+  return (await publishWatchLink(record)).watchUrl;
+}
+
+// A QR code drawn with half-block characters, for terminals and chat code blocks.
+export function qrCode(text: string): string {
+  return renderUnicodeCompact(text, { border: 1 });
 }
 
 // Current SSH details, renewed when they have expired.
