@@ -13,7 +13,6 @@ const PR_URL = "https://github.com/you/billing-api/pull/48";
 const CLAUDE_SPINNER = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
 const HOLD_MS = 2400; // how long a finished scene stays before the next one
 const SLOWDOWN = 3.2; // stretches every pause, keystroke, and hold toward real-life pace
-const LINE_TRAVEL_MS = 2400; // matches the diagram line's transition in styles.css
 
 const root = document.querySelector(".demo");
 if (root) {
@@ -37,77 +36,56 @@ if (root) {
     return node;
   }
 
-  // Sound, synthesized so the page ships no audio files. Everything is quiet
-  // by design: it should sit under the visitor's attention, not on top of it.
+  // Sound, from real recordings: CC0 office-keyboard keypresses, and OpenCode's
+  // own agent and tool sounds (credits in sounds/CREDITS.md).
+  const SOUND_FILES = {
+    keys: [1, 2, 3, 4, 5, 6].map((n) => `sounds/key-${n}.mp3`),
+    message: "sounds/staplebops-01.mp3",
+    tool: "sounds/yup-01.mp3",
+    done: "sounds/bip-bop-01.mp3",
+  };
+
   const sound = {
     context: undefined,
+    buffers: {},
     start() {
-      this.context ??= new AudioContext();
-      void this.context.resume();
+      if (this.context) return void this.context.resume();
+      this.context = new AudioContext();
+      const load = (url) =>
+        fetch(url)
+          .then((response) => response.arrayBuffer())
+          .then((data) => this.context.decodeAudioData(data))
+          .catch(() => undefined);
+      Promise.all(SOUND_FILES.keys.map(load)).then((keys) => (this.buffers.keys = keys.filter(Boolean)));
+      for (const name of ["message", "tool", "done"]) load(SOUND_FILES[name]).then((buffer) => (this.buffers[name] = buffer));
     },
     get ready() {
       return !paused && this.context?.state === "running";
     },
-    // A filtered noise burst, close to a laptop key.
-    key(low = false) {
-      if (!this.ready) return;
-      const ctx = this.context;
-      const length = Math.floor(ctx.sampleRate * 0.03);
-      const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length) ** 3;
-      const source = ctx.createBufferSource();
+    play(buffer, volume, rate = 1) {
+      if (!this.ready || !buffer) return;
+      const source = this.context.createBufferSource();
       source.buffer = buffer;
-      const filter = ctx.createBiquadFilter();
-      filter.type = "bandpass";
-      filter.frequency.value = (low ? 1200 : 2600) + Math.random() * 900;
-      filter.Q.value = 1.4;
-      const gain = ctx.createGain();
-      gain.gain.value = low ? 0.22 : 0.14;
-      source.connect(filter).connect(gain).connect(ctx.destination);
+      source.playbackRate.value = rate;
+      const gain = this.context.createGain();
+      gain.gain.value = volume;
+      source.connect(gain).connect(this.context.destination);
       source.start();
     },
-    tone(frequency, at, duration, volume, type = "sine") {
-      const ctx = this.context;
-      const start = ctx.currentTime + at;
-      const osc = ctx.createOscillator();
-      osc.type = type;
-      osc.frequency.value = frequency;
-      const gain = ctx.createGain();
-      gain.gain.setValueAtTime(0, start);
-      gain.gain.linearRampToValueAtTime(volume, start + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start(start);
-      osc.stop(start + duration + 0.02);
+    // A different recording and a slightly different pitch each time, like real typing.
+    key(enter = false) {
+      const keys = this.buffers.keys ?? [];
+      const buffer = keys[Math.floor(Math.random() * keys.length)];
+      this.play(buffer, enter ? 0.7 : 0.45, enter ? 0.85 : 0.94 + Math.random() * 0.12);
     },
-    // A short tick when a tool finishes.
-    tick() {
-      if (this.ready) this.tone(1320, 0, 0.07, 0.035);
+    message() {
+      this.play(this.buffers.message, 0.35);
     },
-    // A soft rising sweep while the work travels along the diagram line.
-    travel() {
-      if (!this.ready) return;
-      const ctx = this.context;
-      const start = ctx.currentTime;
-      const seconds = LINE_TRAVEL_MS / 1000;
-      const osc = ctx.createOscillator();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(220, start);
-      osc.frequency.exponentialRampToValueAtTime(440, start + seconds);
-      const gain = ctx.createGain();
-      gain.gain.setValueAtTime(0, start);
-      gain.gain.linearRampToValueAtTime(0.03, start + seconds * 0.4);
-      gain.gain.linearRampToValueAtTime(0, start + seconds);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start(start);
-      osc.stop(start + seconds + 0.05);
+    tool() {
+      this.play(this.buffers.tool, 0.3);
     },
-    // Two notes when the pull request lands.
-    chime() {
-      if (!this.ready) return;
-      this.tone(659.25, 0, 0.6, 0.05, "triangle");
-      this.tone(987.77, 0.12, 0.9, 0.045, "triangle");
+    done() {
+      this.play(this.buffers.done, 0.45);
     },
   };
 
@@ -115,7 +93,6 @@ if (root) {
   // 2 sandbox, 3 moving back, 4 pull request.
   function setStage(stage) {
     root.dataset.stage = String(stage);
-    if (stage === 1 || stage === 3) sound.travel();
   }
 
   function wait(ms) {
@@ -212,6 +189,7 @@ if (root) {
   function claudeSays(ui, ...parts) {
     const p = el("p", "line");
     p.append(el("span", "bullet", "●"), ...parts);
+    sound.message();
     return show(ui.transcript, p, ui.scroll);
   }
 
@@ -221,7 +199,7 @@ if (root) {
     show(ui.transcript, call, ui.scroll);
     await pace(runMs);
     call.classList.replace("running", "ok");
-    sound.tick();
+    sound.tool();
     for (const parts of output) {
       const p = el("p", "line result");
       p.append(...parts);
@@ -276,7 +254,7 @@ if (root) {
     p.append(el("span", "oc-muted", `${mark} `), name, " ", el("span", "oc-muted", target));
     show(ui.transcript, p, ui.scroll);
     if (block) show(ui.transcript, block, ui.scroll);
-    sound.tick();
+    sound.tool();
   }
 
   function opencodeBlock(...lines) {
@@ -365,6 +343,7 @@ if (root) {
           opencodeBlock([`[handoff/h3k9-result 3f2c1e9] ${TASK}`], [" 3 files changed, 64 insertions(+), 2 deletions(-)"]),
         );
         await opencodeWork(ui, 600);
+        sound.message();
         show(
           ui.transcript,
           el("p", "line", "Failed webhooks now retry up to 5 times with exponential backoff. Tests pass, and the work is committed."),
@@ -392,8 +371,9 @@ if (root) {
           ["⎿  Handoff h3k9 completed."],
           ["   Draft pull request: ", el("u", "", PR_URL)],
         );
-        sound.chime();
         claudeSays(ui, "OpenCode finished. Failed Stripe webhooks now retry with backoff, and the tests pass: ", el("u", "", PR_URL));
+        await pace(250);
+        sound.done();
       },
     },
   ];
