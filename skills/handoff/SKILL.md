@@ -40,6 +40,8 @@ agent that has never seen this conversation.
 1. Call `handoff_prepare` with the brief as soon as you notice the intent.
    - Pass `targetAgent` only when the user names an agent to continue the
      work, such as `codex` or `claude`.
+   - Pass `model` only when the user names a model, in the cloud agent's own
+     format. For OpenCode that is provider/model, such as `opencode/big-pickle`.
    - Preparation warms the sandbox in the background. Keep working while it runs.
 2. Read the result. Tell the user about each warning, such as a missing key,
    a short sandbox time limit, or files the snapshot branch would include.
@@ -56,7 +58,16 @@ agent that has never seen this conversation.
 - The remote agent owns the task. Treat this local session as read-only.
 - Call `handoff_status` when the user asks about progress. It returns the
   state, the remote log, the draft pull request, and SSH details when the
-  provider supports SSH.
+  provider supports SSH. You cannot check in during the turn that started the
+  handoff; check in a later turn.
+- Call `handoff_work` when the user asks what the cloud agent has done. Set
+  `diff` only when they want to read the changes themselves.
+- Call `handoff_message` when the user wants to tell the cloud agent
+  something, such as a correction or an extra task. Pass their instructions
+  as the message. A finished run resumes to answer it and updates the pull
+  request.
 - Give the user the SSH command or editor URI from `handoff_status` when
   they want to open the remote workspace.
 - Call `handoff_stop` only when the user asks to stop the remote work.
+- Tell the user they can also check in from a terminal: `agent-handoff status`,
+  `work`, `logs -f`, `send`, `ssh`, and `attach` (watch and steer OpenCode live).

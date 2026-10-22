@@ -97,8 +97,22 @@ prime-agent mcp add agent-handoff --url http://127.0.0.1:7878/mcp
 2. Tell the agent you want the work to continue remotely. Name an agent if a different one should finish it, for example "let Codex finish this in the cloud."
 3. The agent calls `handoff_prepare` with a brief, reports any warnings, and then calls `handoff_start`.
 4. The agent ends its turn. The transfer continues in the background.
-5. Ask the agent for the handoff status to get progress, the SSH command, and the editor URI.
+5. Check in while it works, through your agent or from a terminal (see [Check in on a handoff](#check-in-on-a-handoff)).
 6. When the remote agent finishes, review the draft pull request on GitHub.
+
+## Check in on a handoff
+
+Ask your agent for an update, what changed, or to tell the cloud agent something new. Or run these from the repository in a terminal. Without an ID, each command uses the newest handoff for the current repository.
+
+| Command | What it does |
+| --- | --- |
+| `agent-handoff status [id]` | Shows the state, recent remote log, draft pull request, and SSH details. |
+| `agent-handoff work [id] [--diff]` | Lists the cloud agent's commits and changed files since the handoff. `--diff` adds the full diff. |
+| `agent-handoff logs [id] [-f]` | Prints the remote log. `-f` keeps following it until the run ends. |
+| `agent-handoff send [id] "message"` | Sends the cloud agent new instructions. A running agent reads them when its current turn ends and continues in the same session. A finished run resumes to answer them, then updates the result branch and pull request. |
+| `agent-handoff ssh [id]` | Opens a shell in the sandbox, in the project folder. Needs a provider with SSH. |
+| `agent-handoff attach [id]` | Opens OpenCode's live session in your terminal over an SSH tunnel, so you can watch and type into it. Quitting leaves the cloud agent running. Needs OpenCode as the cloud agent and a provider with SSH. |
+| `agent-handoff stop [id]` | Stops the cloud agent and its sandbox. Pushed branches stay. |
 
 ## The handoff brief
 
@@ -118,9 +132,11 @@ The calling agent writes a brief with these fields. It is the continuation conte
 
 | Tool | Purpose |
 | --- | --- |
-| `handoff_prepare` | Checks the repository and keys, returns warnings, and warms a sandbox in the background. Takes `brief`, and optionally `targetAgent` and `projectDir`. |
+| `handoff_prepare` | Checks the repository and keys, returns warnings, and warms a sandbox in the background. Takes `brief`, and optionally `targetAgent`, `model`, and `projectDir`. `model` is in the cloud agent's own format, such as `opencode/big-pickle`; without it, the model chosen in setup applies, then the agent's default. |
 | `handoff_start` | Starts the transfer. Takes `handoffId`, or a `brief` to prepare and start in one call. Repeated calls never launch a second remote agent. |
 | `handoff_status` | Returns the state, recent events, the remote log, the draft pull request, and SSH details when the provider supports SSH. |
+| `handoff_work` | Lists the cloud agent's commits and changed files since the handoff. Set `diff` for the full diff. |
+| `handoff_message` | Sends the cloud agent new instructions. A running agent reads them when its turn ends; a finished run resumes to answer them. |
 | `handoff_stop` | Stops the helper and the sandbox. Pushed branches stay on the remote. |
 
 ### Handoff states
@@ -202,6 +218,7 @@ Handoff records and helper logs live in `~/.local/state/agent-handoff/`.
 - The local session is read-only by convention only. The handoff cannot block further edits.
 - Unsaved editor buffers are not transferred. Save files before you hand off.
 - Only OpenCode sessions move in full today. Other agents continue from the brief.
-- The runner pushes and opens the pull request once, when the first remote turn ends. If you continue the session remotely, push again yourself.
+- Messages reach Claude Code, Codex, and Pi between turns, not mid-turn, because they run headless. Use `attach` with OpenCode to steer mid-turn.
+- When a remote run fails, the next status check stops its sandbox. The pushed result branch keeps any partial work.
 - Free tiers cap run time: 45 minutes on Vercel Hobby and 1 hour on E2B Hobby. Raise the limits with `AGENT_HANDOFF_VERCEL_LIFETIME_MINUTES` or `AGENT_HANDOFF_E2B_LIFETIME_MINUTES` on paid plans.
 - Prime Intellect has no stop or pause, so `handoff_stop` deletes the sandbox.

@@ -903,6 +903,11 @@ dt {
   line-height: 1.5;
 }
 
+dd code {
+  font: 400 0.9em / 1 var(--mono);
+  color: var(--ink);
+}
+
 dd {
   max-width: 34em;
   font-size: var(--t-body);
