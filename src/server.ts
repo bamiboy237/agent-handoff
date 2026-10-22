@@ -8,11 +8,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type LocalAgent, detectLocalAgent } from "./agents/local.js";
 import { REMOTE_AGENT_NAMES, remoteAgent } from "./agents/remote.js";
+import { describe, findHandoff, refreshFromSandbox, remoteWork, sandboxes, sendMessage, stopHandoff } from "./checkin.js";
 import { loadConfig, loadEnv } from "./config.js";
 import { type HandoffBrief, type HandoffRecord, TERMINAL_STATES } from "./contract.js";
 import { collectSandboxEnv } from "./credentials.js";
 import { createSnapshotCommit, inspectRepo } from "./git-snapshot.js";
-import { type SandboxAdapter, sandboxAdapter } from "./sandboxes/sandbox.js";
 import { RUNNER_SCRIPT, planSetup } from "./setup.js";
 import {
   appendLog,
@@ -20,7 +20,6 @@ import {
   listRecords,
   readRecord,
   readStartSignal,
-  updateRecord,
   writeRecord,
   writeStartSignal,
 } from "./store.js";
@@ -43,17 +42,19 @@ const briefSchema = z.object({
   verification: z.string().optional().describe("How to check the work, such as the test command."),
 });
 
+const modelSchema = z
+  .string()
+  .optional()
+  .describe(
+    "Model for the cloud agent, in that agent's own format. For OpenCode, provider/model, such as opencode/big-pickle. Defaults to the configured model, then the agent's default.",
+  );
+
 function reply(text: string, isError = false) {
   return { content: [{ type: "text" as const, text }], isError };
 }
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function sandboxes(provider?: string): SandboxAdapter {
-  const config = loadConfig();
-  return sandboxAdapter(provider ? { ...config, provider } : config, loadEnv());
 }
 
 function helperAlive(record: HandoffRecord): boolean {
@@ -78,23 +79,15 @@ function spawnHelper(id: string): void {
   if (child.pid) spawnedHelpers.set(id, child.pid);
 }
 
-function describe(record: HandoffRecord, extra: string[] = []): string {
-  const lines = [
-    `Handoff: ${record.id}`,
-    `State: ${record.state}`,
-    ...(record.failedStep ? [`Failed step: ${record.failedStep}`, `Error: ${record.error}`] : []),
-    `Agents: ${record.sourceAgent} -> ${record.targetAgent}${record.transferSession ? " (session moved)" : " (brief only)"}`,
-    `Branches: ${record.baseBranch} -> ${record.snapshotBranch} -> ${record.resultBranch}`,
-    ...(record.sandboxId ? [`Sandbox: ${record.sandboxProvider} ${record.sandboxId}`] : []),
-    ...(record.remoteDir ? [`Remote directory: ${record.remoteDir}`] : []),
-    ...(record.prUrl ? [`Draft pull request: ${record.prUrl}`] : []),
-    ...(record.ssh ? [`SSH: ${record.ssh.command}`] : []),
-    ...(record.ssh?.uri ? [`Editor URI: ${record.ssh.uri}`] : []),
-    ...extra,
-    "Recent events:",
-    ...record.log.slice(-8).map((entry) => `  ${entry.at} ${entry.message}`),
-  ];
-  return lines.join("\n");
+// The client's workspace, used to pick the newest handoff for this project.
+async function workspaceDir(server: McpServer): Promise<string | undefined> {
+  try {
+    const { roots } = await server.server.listRoots();
+    const root = roots.find((entry) => entry.uri.startsWith("file://"));
+    return root ? fileURLToPath(root.uri) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // The directory to hand off: the explicit argument, the calling session's
@@ -120,6 +113,7 @@ async function resolveProjectDir(
 interface PrepareInput {
   brief: HandoffBrief;
   targetAgent?: string;
+  model?: string;
   projectDir?: string;
 }
 
@@ -173,6 +167,7 @@ async function prepare(
     sourceAgent: local.name,
     targetAgent: remote.name,
     targetAgentVersion,
+    targetModel: input.model ?? (targetName === config.targetAgent ? config.targetModel : undefined),
     sessionId,
     transferSession,
     snapshotMode: sessionId && local.session ? "on_idle" : "immediate",
@@ -210,39 +205,6 @@ async function prepare(
   return { record, notes };
 }
 
-// Reads the runner's state file once the helper has exited. The sandbox is
-// the source of truth from then on.
-async function refreshFromSandbox(record: HandoffRecord): Promise<{ record: HandoffRecord; lines: string[] }> {
-  const provider = sandboxes(record.sandboxProvider);
-  const sandboxState = await provider.state(record.sandboxId!);
-  const lines = [`Sandbox state: ${sandboxState}`];
-  if (sandboxState !== "running") return { record, lines };
-
-  const dir = `${record.remoteRoot}/.agent-handoff`;
-  const result = await provider.exec(
-    record.sandboxId!,
-    `bash -c 'cd "${dir}" 2>/dev/null && { cat state; echo @@; cat pr-url; echo @@; tail -n 30 runner.log; } 2>/dev/null'`,
-    30,
-  );
-  const [remoteState = "", prUrl = "", remoteLog = ""] = result.output.split("@@").map((part) => part.trim());
-  const sshExpired = !record.ssh || (record.ssh.expiresAt !== undefined && Date.parse(record.ssh.expiresAt) < Date.now());
-  const ssh = sshExpired && provider.sshAccess ? await provider.sshAccess(record.sandboxId!, record.remoteDir!) : record.ssh;
-  const updated = updateRecord(record.id, (r) => {
-    if (remoteState === "completed" && r.state !== "completed") {
-      r.state = "completed";
-      appendLog(r, "Remote agent finished and pushed the result branch.");
-    } else if (remoteState.startsWith("failed:")) {
-      r.state = "failed";
-      r.failedStep = `remote_${remoteState.slice("failed:".length)}`;
-      r.error = "The remote runner failed. See the remote log.";
-    }
-    if (prUrl) r.prUrl = prUrl;
-    r.ssh = ssh;
-  });
-  if (remoteLog) lines.push("Remote log:", remoteLog);
-  return { record: updated, lines };
-}
-
 export function createServer(): McpServer {
   const server = new McpServer({ name: "agent-handoff", version: "0.2.0" });
 
@@ -258,12 +220,13 @@ export function createServer(): McpServer {
           .enum(REMOTE_AGENT_NAMES as [string, ...string[]])
           .optional()
           .describe("Agent that continues in the sandbox. Defaults to the configured agent, then the calling agent."),
+        model: modelSchema,
         projectDir: z.string().optional().describe("Absolute path of the repository. Defaults to the current workspace."),
       },
     },
-    async ({ brief, targetAgent, projectDir }, extra) => {
+    async ({ brief, targetAgent, model, projectDir }, extra) => {
       try {
-        const { record, notes } = await prepare(server, { brief, targetAgent, projectDir }, extra._meta as Meta);
+        const { record, notes } = await prepare(server, { brief, targetAgent, model, projectDir }, extra._meta as Meta);
         return reply([describe(record), ...notes, "", "Call handoff_start when the user is ready to move."].join("\n"));
       } catch (error) {
         return reply(`handoff_prepare failed: ${errorText(error)}`, true);
@@ -281,17 +244,18 @@ export function createServer(): McpServer {
         handoffId: z.string().optional().describe("ID from handoff_prepare. Omit it to prepare and start in one call."),
         brief: briefSchema.optional().describe("Updated brief. Required when handoffId is omitted."),
         targetAgent: z.enum(REMOTE_AGENT_NAMES as [string, ...string[]]).optional(),
+        model: modelSchema,
         projectDir: z.string().optional(),
       },
     },
-    async ({ handoffId, brief, targetAgent, projectDir }, extra) => {
+    async ({ handoffId, brief, targetAgent, model, projectDir }, extra) => {
       try {
         let record: HandoffRecord;
         let notes: string[] = [];
         if (handoffId) {
           record = readRecord(handoffId);
         } else if (brief) {
-          ({ record, notes } = await prepare(server, { brief, targetAgent, projectDir }, extra._meta as Meta));
+          ({ record, notes } = await prepare(server, { brief, targetAgent, model, projectDir }, extra._meta as Meta));
         } else {
           return reply("handoff_start needs a handoffId from handoff_prepare, or a brief to prepare one now.", true);
         }
@@ -314,7 +278,7 @@ export function createServer(): McpServer {
             `Handoff ${record.id} is starting. ${record.targetAgent} continues the work in the sandbox.`,
             ...notes,
             "End your turn now with one short message telling the user the task is moving to the cloud. Do not call more tools or edit files.",
-            "The user can check progress and get the SSH details with handoff_status.",
+            "In later turns: handoff_status reports progress and SSH details, handoff_work shows the changes so far, and handoff_message sends the cloud agent new instructions.",
           ].join("\n"),
         );
       } catch (error) {
@@ -328,7 +292,7 @@ export function createServer(): McpServer {
     {
       title: "Cloud handoff status",
       description:
-        "Report a handoff's progress, remote log, draft pull request, and SSH details. Omit handoffId for the latest handoff of this session or workspace.",
+        "Check on a handoff: its progress, recent remote log, draft pull request, and SSH details. Omit handoffId for the latest handoff of this session or workspace.",
       inputSchema: {
         handoffId: z.string().optional(),
       },
@@ -355,6 +319,51 @@ export function createServer(): McpServer {
   );
 
   server.registerTool(
+    "handoff_work",
+    {
+      title: "Cloud agent's work so far",
+      description:
+        "Show what the cloud agent has changed since the handoff: its commits, changed files, and new files. Set diff to include the full diff. Omit handoffId for the latest handoff in this workspace.",
+      inputSchema: {
+        handoffId: z.string().optional(),
+        diff: z.boolean().optional().describe("Include the full diff. It can be long."),
+      },
+    },
+    async ({ handoffId, diff }) => {
+      try {
+        const record = findHandoff(handoffId, await workspaceDir(server));
+        const work = await remoteWork(record, diff ?? false);
+        // Keeps a long diff from flooding the conversation.
+        const limit = 40_000;
+        return reply(work.length > limit ? `${work.slice(0, limit)}\n\n[Truncated. Run \`agent-handoff work --diff\` for the rest.]` : work);
+      } catch (error) {
+        return reply(`handoff_work failed: ${errorText(error)}`, true);
+      }
+    },
+  );
+
+  server.registerTool(
+    "handoff_message",
+    {
+      title: "Message the cloud agent",
+      description:
+        "Send the cloud agent new instructions, such as a correction or an extra task. A running agent reads them when its current turn ends and continues in the same session. A finished run resumes to answer them, then updates the result branch and pull request. Omit handoffId for the latest handoff in this workspace.",
+      inputSchema: {
+        handoffId: z.string().optional(),
+        message: z.string().min(1).describe("The instructions, written for the cloud agent."),
+      },
+    },
+    async ({ handoffId, message }) => {
+      try {
+        const record = findHandoff(handoffId, await workspaceDir(server));
+        return reply(await sendMessage(record, message));
+      } catch (error) {
+        return reply(`handoff_message failed: ${errorText(error)}`, true);
+      }
+    },
+  );
+
+  server.registerTool(
     "handoff_stop",
     {
       title: "Stop cloud handoff",
@@ -366,16 +375,8 @@ export function createServer(): McpServer {
     async ({ handoffId }) => {
       try {
         const record = readRecord(handoffId);
-        if (helperAlive(record)) process.kill((record.helperPid ?? spawnedHelpers.get(record.id))!, "SIGTERM");
-        if (record.sandboxId) {
-          const provider = sandboxes(record.sandboxProvider);
-          if ((await provider.state(record.sandboxId)) === "running") await provider.stop(record.sandboxId);
-        }
-        const stopped = updateRecord(handoffId, (r) => {
-          r.state = "stopped";
-          appendLog(r, "Stopped through handoff_stop.");
-        });
-        return reply(describe(stopped));
+        const helperPid = record.helperPid ?? spawnedHelpers.get(record.id);
+        return reply(describe(await stopHandoff({ ...record, helperPid })));
       } catch (error) {
         return reply(`handoff_stop failed: ${errorText(error)}`, true);
       }

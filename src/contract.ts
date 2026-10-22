@@ -60,6 +60,7 @@ export interface HandoffRecord {
   sourceAgent: string; // the agent that called the tools
   targetAgent: string; // the agent that continues in the sandbox
   targetAgentVersion?: string;
+  targetModel?: string; // in the target agent's own format; unset uses the agent's default
   sessionId?: string; // set only when the source agent identifies its session
   transferSession: boolean; // move the native session instead of relying on the brief alone
   snapshotMode: "on_idle" | "immediate";

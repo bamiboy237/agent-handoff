@@ -3,6 +3,7 @@
 //   agent-handoff               MCP server over stdio (what agents launch)
 //   agent-handoff --http <port> MCP server over streamable HTTP on localhost
 //   agent-handoff setup         choose a sandbox provider and register the server with agents
+//   agent-handoff status|work|logs|send|ssh|attach|stop   check in on a handoff (see cli.ts)
 // Each mode imports only what it uses, so `setup` starts without loading the server.
 import { createServer as createHttpServer } from "node:http";
 
@@ -43,6 +44,9 @@ const [command, value] = process.argv.slice(2);
 if (command === "setup") {
   const { runSetup } = await import("./configure.js");
   await runSetup();
+} else if (command && ["status", "work", "logs", "send", "ssh", "attach", "stop"].includes(command)) {
+  const { runCheckIn } = await import("./cli.js");
+  await runCheckIn(command, process.argv.slice(3));
 } else if (command === "--http") {
   const port = Number(value);
   if (!Number.isInteger(port) || port <= 0) {
@@ -55,6 +59,6 @@ if (command === "setup") {
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
   await createServer().connect(new StdioServerTransport());
 } else {
-  console.error("usage: agent-handoff [setup | --http <port>]");
+  console.error("usage: agent-handoff [setup | status | work | logs | send | ssh | attach | stop | --http <port>]");
   process.exit(2);
 }

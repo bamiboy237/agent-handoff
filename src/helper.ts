@@ -97,6 +97,7 @@ async function run(id: string): Promise<void> {
       HANDOFF_ID: record.id,
       TARGET_AGENT: record.targetAgent,
       AGENT_VERSION: record.targetAgentVersion ?? "",
+      AGENT_MODEL: record.targetModel ?? "",
       REPO_URL: record.cloneUrl,
       SNAPSHOT_BRANCH: record.snapshotBranch,
       RESULT_BRANCH: record.resultBranch,

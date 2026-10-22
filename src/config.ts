@@ -12,6 +12,7 @@ export interface SshHostConfig {
 export interface HandoffConfig {
   provider: string;
   targetAgent?: string; // default remote agent; otherwise the calling agent
+  targetModel?: string; // default model for the remote agent; otherwise the agent's own default
   ssh?: SshHostConfig;
 }
 
@@ -31,6 +32,7 @@ export function loadConfig(): HandoffConfig {
   return {
     provider: process.env.AGENT_HANDOFF_PROVIDER || file.provider || "daytona",
     targetAgent: process.env.AGENT_HANDOFF_TARGET_AGENT || file.targetAgent,
+    targetModel: process.env.AGENT_HANDOFF_TARGET_MODEL || file.targetModel,
     ssh: sshHost ? { host: sshHost } : file.ssh,
   };
 }

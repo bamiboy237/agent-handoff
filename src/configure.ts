@@ -360,6 +360,17 @@ export async function runSetup(): Promise<void> {
           }),
         );
 
+  // Blank keeps the agent's own default model, which may be one your keys cannot use.
+  const defaultLabel = CLOUD_AGENTS.find((agent) => agent.name === config.targetAgent)?.label ?? config.targetAgent;
+  const model = answer(
+    await p.text({
+      message: `Model for ${defaultLabel} in the cloud ${dim("(Enter for its default)")}`,
+      placeholder: config.targetAgent === "opencode" ? "opencode/big-pickle" : "provider/model",
+      initialValue: current.targetAgent === config.targetAgent ? (current.targetModel ?? "") : "",
+    }),
+  ).trim();
+  config.targetModel = model || undefined;
+
   const detectSpin = p.spinner();
   detectSpin.start("Detecting installed agents");
   const found = await Promise.all(
@@ -433,7 +444,7 @@ export async function runSetup(): Promise<void> {
   const summary = [
     `Provider: ${provider.name}${config.ssh ? ` (${config.ssh.host})` : ""}`,
     `Keys to save: ${Object.keys(secrets).join(", ") || "none"}`,
-    `Cloud agents: ${cloudAgents.map((name) => CLOUD_AGENTS.find((agent) => agent.name === name)?.label).join(", ")} (default ${config.targetAgent})`,
+    `Cloud agents: ${cloudAgents.map((name) => CLOUD_AGENTS.find((agent) => agent.name === name)?.label).join(", ")} (default ${config.targetAgent}${config.targetModel ? `, model ${config.targetModel}` : ""})`,
     `MCP server: ${registerAgents.map((name) => agentOf(name).label).join(", ") || "not registered"}`,
     ...(npxRoot && registerAgents.length > 0 ? [`Install folder: ${installDir}`] : []),
     ...(skillTargets.size > 0
