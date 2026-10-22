@@ -15,7 +15,8 @@ It works from any agent that supports MCP and from any editor or terminal.
 | Codex | Yes | Yes | Not yet. The brief carries the context |
 | Pi | Yes | Yes | Not yet. The brief carries the context |
 | Prime Agent | Yes, over HTTP | No headless mode yet | No |
-| Zed agent and other MCP clients | Yes | No | No |
+| Zed agent | Yes | No | No |
+| Other MCP clients | Yes, after you add the server yourself | No | No |
 
 ## Supported sandbox providers
 
@@ -62,7 +63,7 @@ It works from any agent that supports MCP and from any editor or terminal.
    - asks which agents can continue your work in the cloud: OpenCode, Codex, Claude Code, or Pi;
    - asks only for the keys those agents need, and skips an agent that already has a login or a key (OpenCode uses your OpenCode login, and Codex uses `~/.codex/auth.json`);
    - when you pick more than one agent, asks which one is the default. The calling agent can still name another one for a single handoff;
-   - detects the agents on your machine and asks which ones get the MCP server;
+   - detects the agents and editors on your machine and asks which ones get the MCP server. Command-line agents are registered with their own `mcp add` command. The Zed agent is registered by adding an `agent-handoff` entry under `context_servers` in Zed's settings, which keeps your existing servers and comments. Running setup again replaces the entry instead of adding a second one;
    - asks which agents get the handoff skill, and whether to install it in the project or globally;
    - shows a summary and asks you to confirm before it writes anything.
 

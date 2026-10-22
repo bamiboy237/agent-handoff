@@ -3,12 +3,13 @@
 // agents installed on this machine, and install the handoff skill. The prompts
 // and flow follow `npx skills add` (vercel-labs/skills).
 import { execFile } from "node:child_process";
-import { cpSync, existsSync, mkdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify, styleText } from "node:util";
 import * as p from "@clack/prompts";
+import { applyEdits, modify, type ParseError, parse } from "jsonc-parser";
 import { type HandoffConfig, loadConfig, loadEnv, saveConfig, saveSecrets, secretsPath } from "./config.js";
 
 const execFileAsync = promisify(execFile);
@@ -89,6 +90,9 @@ interface AgentRegistration {
   binary: string;
   // Undefined for agents that connect by URL instead of a stdio command.
   args?: string[];
+  // For editors with no `mcp add` command: the JSON file that lists their MCP
+  // servers. The editor counts as installed when the file's directory exists.
+  configFile?: ConfigFile;
   skills?: { global: string; project: string };
 }
 
@@ -96,6 +100,16 @@ interface AgentRegistration {
 // OpenCode, Codex, and Pi read the shared .agents/skills directory in a project.
 const xdgConfigHome = process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config");
 const claudeHome = process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), ".claude");
+const appData = process.env.APPDATA?.trim() || join(homedir(), "AppData", "Roaming");
+// Zed reads ~/.config/zed on macOS too, not ~/Library/Application Support/Zed.
+const zedConfigDir = process.platform === "win32" ? join(appData, "Zed") : join(xdgConfigHome, "zed");
+
+interface ConfigFile {
+  path: string;
+  // The top-level object that maps server names to servers.
+  serversKey: string;
+  entry(command: string, args: string[]): Record<string, unknown>;
+}
 
 // Commands that add a stdio MCP server to each agent's user-level config.
 const REGISTRATIONS: Record<string, AgentRegistration> = {
@@ -124,9 +138,49 @@ const REGISTRATIONS: Record<string, AgentRegistration> = {
     skills: { global: join(homedir(), ".agents", "skills"), project: join(".agents", "skills") },
   },
   "prime-agent": { label: "Prime Agent", binary: "prime-agent" },
+  zed: {
+    label: "Zed agent",
+    binary: "zed",
+    configFile: {
+      path: join(zedConfigDir, "settings.json"),
+      serversKey: "context_servers",
+      entry: (command, args) => ({ command, args, env: {} }),
+    },
+  },
 };
 
 const PRIME_AGENT_HINT = `Prime Agent connects by URL. Start \`agent-handoff --http ${HTTP_PORT}\`, then run:\n  prime-agent mcp add agent-handoff --url http://127.0.0.1:${HTTP_PORT}/mcp`;
+
+// Editors are GUI apps that may not inherit the shell's PATH, so their entries name
+// node by absolute path. The PATH lookup gives a stable link such as
+// /opt/homebrew/bin/node; process.execPath is the versioned target, which breaks on
+// the next upgrade.
+async function nodePath(): Promise<string> {
+  try {
+    return (await execFileAsync("which", ["node"])).stdout.trim() || process.execPath;
+  } catch {
+    return process.execPath;
+  }
+}
+
+async function serverEntry(file: ConfigFile): Promise<Record<string, unknown>> {
+  return file.entry(await nodePath(), [SERVER_ENTRY]);
+}
+
+// Zed's settings may hold comments and trailing commas.
+// Editing in place keeps the user's comments and formatting, which re-serializing
+// would drop. Running setup again replaces the agent-handoff entry.
+async function registerInConfigFile(file: ConfigFile): Promise<void> {
+  const text = existsSync(file.path) ? readFileSync(file.path, "utf8") : "{}\n";
+  const errors: ParseError[] = [];
+  parse(text, errors, { allowTrailingComma: true });
+  if (errors.length > 0) throw new Error(`${file.path} could not be parsed`);
+  const edits = modify(text, [file.serversKey, "agent-handoff"], await serverEntry(file), {
+    formattingOptions: { insertSpaces: true, tabSize: 2, eol: "\n" },
+  });
+  mkdirSync(dirname(file.path), { recursive: true });
+  writeFileSync(file.path, applyEdits(text, edits));
+}
 
 async function installed(binary: string): Promise<boolean> {
   try {
@@ -260,7 +314,10 @@ export async function runSetup(): Promise<void> {
   const detectSpin = p.spinner();
   detectSpin.start("Detecting installed agents");
   const found = await Promise.all(
-    Object.entries(REGISTRATIONS).map(async ([name, agent]) => ((await installed(agent.binary)) ? name : undefined)),
+    Object.entries(REGISTRATIONS).map(async ([name, agent]) => {
+      const present = agent.configFile ? existsSync(dirname(agent.configFile.path)) : await installed(agent.binary);
+      return present ? name : undefined;
+    }),
   );
   const detected = found.filter((name): name is string => name !== undefined);
   detectSpin.stop(
@@ -271,7 +328,9 @@ export async function runSetup(): Promise<void> {
   let skillAgents: string[] = [];
   let skillScope: "project" | "global" = "global";
   if (detected.length === 0) {
-    p.log.warn("Install opencode, claude, codex, pi, or prime-agent, then run setup again to register the server.");
+    p.log.warn(
+      "Install OpenCode, Claude Code, Codex, Pi, Prime Agent, or Zed, then run setup again to register the server.",
+    );
   } else {
     registerAgents = answer(
       await p.multiselect({
@@ -279,7 +338,7 @@ export async function runSetup(): Promise<void> {
         options: detected.map((name) => ({
           value: name,
           label: agentOf(name).label,
-          hint: agentOf(name).args ? undefined : "connects by URL",
+          hint: agentOf(name).args || agentOf(name).configFile ? undefined : "connects by URL",
         })),
         initialValues: detected,
         required: false,
@@ -344,19 +403,24 @@ export async function runSetup(): Promise<void> {
   results.push(`Keys are in ${secretsPath()} (readable only by you).`);
 
   for (const name of registerAgents) {
-    const { label, binary, args } = agentOf(name);
-    if (!args) {
+    const { label, binary, args, configFile } = agentOf(name);
+    if (!args && !configFile) {
       results.push(PRIME_AGENT_HINT);
       continue;
     }
     const spin = p.spinner();
     spin.start(`Registering with ${label}`);
     try {
-      await execFileAsync(binary, args);
+      if (configFile) await registerInConfigFile(configFile);
+      else if (args) await execFileAsync(binary, args);
       spin.stop(`Registered with ${label}`);
-    } catch {
+    } catch (error) {
       spin.error(`Could not register with ${label}`);
-      failures.push(`Run it yourself: ${binary} ${args.join(" ")}`);
+      failures.push(
+        configFile
+          ? `${error instanceof Error ? error.message : String(error)}. Add this under "${configFile.serversKey}" in ${configFile.path} yourself:\n  "agent-handoff": ${JSON.stringify(await serverEntry(configFile))}`
+          : `Run it yourself: ${binary} ${args?.join(" ")}`,
+      );
     }
   }
 
