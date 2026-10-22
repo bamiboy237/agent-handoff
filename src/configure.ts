@@ -5,7 +5,7 @@
 import { execFile } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify, styleText } from "node:util";
 import * as p from "@clack/prompts";
@@ -185,11 +185,23 @@ function npxInstallRoot(): string | undefined {
   return end === -1 ? undefined : SERVER_ENTRY.slice(0, end);
 }
 
+// Dependencies ship source maps, type declarations, and docs that nothing loads at
+// runtime. Skipping them halves the copy (152 MB to 73 MB). Licenses and this
+// package's own files, such as the handoff skill's SKILL.md, are always kept.
+const OWN_PACKAGE = dirname(dirname(SERVER_ENTRY));
+const NOT_NEEDED_AT_RUNTIME = /\.(map|d\.[cm]?ts|md)$/i;
+
+function neededAtRuntime(source: string): boolean {
+  return (
+    source.startsWith(OWN_PACKAGE) || /^licen[cs]e/i.test(basename(source)) || !NOT_NEEDED_AT_RUNTIME.test(source)
+  );
+}
+
 // Copies into a fresh folder first, so a failed copy never leaves a half-written install.
 function installServer(root: string): string {
   const staging = `${installDir}.new`;
   rmSync(staging, { recursive: true, force: true });
-  cpSync(root, staging, { recursive: true });
+  cpSync(root, staging, { recursive: true, filter: neededAtRuntime });
   rmSync(installDir, { recursive: true, force: true });
   renameSync(staging, installDir);
   return join(installDir, relative(root, SERVER_ENTRY));
