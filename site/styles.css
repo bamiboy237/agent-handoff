@@ -11,19 +11,11 @@
 }
 
 @font-face {
-  font-family: "Iosevka Charon Mono";
+  font-family: "Paper Mono";
   font-style: normal;
-  font-weight: 400;
+  font-weight: 100 900;
   font-display: swap;
-  src: url("fonts/iosevka-charon-mono-400.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "Iosevka Charon Mono";
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url("fonts/iosevka-charon-mono-700.woff2") format("woff2");
+  src: url("fonts/paper-mono-wght.woff2") format("woff2");
 }
 
 :root {
@@ -59,7 +51,7 @@
   --oc-accent: #5cb1ec;
 
   --sans: "Archivo", ui-sans-serif, system-ui, sans-serif;
-  --mono: "Iosevka Charon Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --mono: "Paper Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
   /* Type scale */
   --t-label: 13px;

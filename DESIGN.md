@@ -36,12 +36,12 @@ typography:
     fontWeight: 400
     lineHeight: 1.5
   code:
-    fontFamily: "Iosevka Charon Mono, ui-monospace, SF Mono, Menlo, monospace"
+    fontFamily: "Paper Mono, ui-monospace, SF Mono, Menlo, monospace"
     fontSize: "15px"
     fontWeight: 400
     lineHeight: 1.5
   label:
-    fontFamily: "Iosevka Charon Mono, ui-monospace, SF Mono, Menlo, monospace"
+    fontFamily: "Paper Mono, ui-monospace, SF Mono, Menlo, monospace"
     fontSize: "13px"
     fontWeight: 400
     lineHeight: 1.2
@@ -113,7 +113,7 @@ The page is a technical drawing of one handoff, set on a dark sheet. A drafting 
 ## Typography
 
 - **Archivo** (variable, self-hosted) carries display, headings, body, and UI. Display is set at 112% width and weight 620 with tight tracking and balanced wrapping. Headings use 108% width, and body uses 100%.
-- **Iosevka Charon Mono** (self-hosted, 400 and 700) is for code, paths, commands, diagram labels, and the title block. Do not use it as decoration for prose.
+- **Paper Mono** (variable, self-hosted) is for code, paths, commands, diagram labels, and the title block. Do not use it as decoration for prose.
 - Window titles use the system UI font, because macOS draws them that way.
 
 ## Layout
@@ -152,4 +152,4 @@ The page is a technical drawing of one handoff, set on a dark sheet. A drafting 
 - Do respect reduced motion: scenes appear finished, the line jumps to its state, and there is no head dot.
 - Don't add eyebrows, section numbers, gradient text, or cards.
 - Don't use italic serif headlines or warm tones. That is Reelcall's world.
-- Don't autoplay sound. It plays only after the visitor presses play.
+- Don't autoplay sound. It plays only after the visitor presses play, and it uses real recordings: CC0 keypresses and OpenCode's agent and tool sounds.
