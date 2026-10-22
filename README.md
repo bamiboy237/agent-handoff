@@ -63,9 +63,9 @@ It works from any agent that supports MCP and from any editor or terminal.
    - asks which agents can continue your work in the cloud: OpenCode, Codex, Claude Code, or Pi;
    - asks only for the keys those agents need, and skips an agent that already has a login or a key (OpenCode uses your OpenCode login, and Codex uses `~/.codex/auth.json`);
    - when you pick more than one agent, asks which one is the default. The calling agent can still name another one for a single handoff;
-   - detects the agents and editors on your machine and asks which ones get the MCP server. Command-line agents are registered with their own `mcp add` command. The Zed agent is registered by adding an `agent-handoff` entry under `context_servers` in Zed's settings, which keeps your existing servers and comments. Running setup again replaces the entry instead of adding a second one;
+   - detects the agents and editors on your machine and asks which ones get the MCP server. OpenCode, Claude Code, and Codex are registered with their own `mcp add` command. Pi and the Zed agent are registered by adding an `agent-handoff` entry to their MCP config file (`~/.pi/agent/mcp.json`, and `context_servers` in Zed's settings), which keeps your existing servers and comments. Pi gets the file because older Pi versions have no `mcp add` command. Running setup again replaces the entry instead of adding a second one;
    - when you run setup through `npx`, copies agent-handoff to `~/.local/share/agent-handoff` (`%LOCALAPPDATA%\agent-handoff` on Windows) and registers that copy. The npx cache is temporary, so agents registered against it would break when npm clears it. Run setup again to update the copy. A source checkout is registered where it is;
-   - asks which agents get the handoff skill, and whether to install it in the project or globally;
+   - asks which agents get the handoff skill, and whether to install it in the project or globally. Codex, Pi, and the Zed agent share the `.agents/skills` folder, so they get one copy;
    - shows a summary and asks you to confirm before it writes anything.
 
    Press Ctrl+C at any prompt to cancel without changing anything. The wizard needs an interactive terminal.

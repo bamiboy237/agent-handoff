@@ -91,8 +91,9 @@ interface AgentRegistration {
   // The `mcp add` arguments for a server entry point. Undefined for agents that
   // connect by URL instead of a stdio command.
   args?: (entry: string) => string[];
-  // For editors with no `mcp add` command: the JSON file that lists their MCP
-  // servers. The editor counts as installed when the file's directory exists.
+  // For agents registered by editing their MCP config file instead of running
+  // `mcp add`. The agent counts as installed when the file's directory exists or
+  // its binary is on PATH.
   configFile?: ConfigFile;
   skills?: { global: string; project: string };
 }
@@ -132,10 +133,16 @@ const REGISTRATIONS: Record<string, AgentRegistration> = {
     args: (entry) => ["mcp", "add", "agent-handoff", "--", "node", entry],
     skills: { global: join(homedir(), ".agents", "skills"), project: join(".agents", "skills") },
   },
+  // Pi added `pi mcp add` only in later versions; older ones treat it as a chat
+  // prompt and wait forever. Every version reads this file.
   pi: {
     label: "Pi",
     binary: "pi",
-    args: (entry) => ["mcp", "add", "agent-handoff", "--", "node", entry],
+    configFile: {
+      path: join(process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), ".pi", "agent"), "mcp.json"),
+      serversKey: "mcpServers",
+      entry: (command, args) => ({ command, args }),
+    },
     skills: { global: join(homedir(), ".agents", "skills"), project: join(".agents", "skills") },
   },
   "prime-agent": { label: "Prime Agent", binary: "prime-agent" },
@@ -147,6 +154,8 @@ const REGISTRATIONS: Record<string, AgentRegistration> = {
       serversKey: "context_servers",
       entry: (command, args) => ({ command, args, env: {} }),
     },
+    // Zed reads skills from the shared .agents/skills directories (Zed 1.4.2 and later).
+    skills: { global: join(homedir(), ".agents", "skills"), project: join(".agents", "skills") },
   },
 };
 
@@ -355,7 +364,7 @@ export async function runSetup(): Promise<void> {
   detectSpin.start("Detecting installed agents");
   const found = await Promise.all(
     Object.entries(REGISTRATIONS).map(async ([name, agent]) => {
-      const present = agent.configFile ? existsSync(dirname(agent.configFile.path)) : await installed(agent.binary);
+      const present = (agent.configFile && existsSync(dirname(agent.configFile.path))) || (await installed(agent.binary));
       return present ? name : undefined;
     }),
   );
@@ -469,7 +478,8 @@ export async function runSetup(): Promise<void> {
     spin.start(`Registering with ${label}`);
     try {
       if (configFile) await registerInConfigFile(configFile, entry);
-      else if (args) await execFileAsync(binary, args(entry));
+      // A timeout, so an agent that waits for input cannot hang setup.
+      else if (args) await execFileAsync(binary, args(entry), { timeout: 30_000 });
       spin.stop(`Registered with ${label}`);
     } catch (error) {
       spin.error(`Could not register with ${label}`);
