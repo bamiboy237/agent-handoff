@@ -100,6 +100,16 @@ prime-agent mcp add agent-handoff --url http://127.0.0.1:7878/mcp
 5. Check in while it works, through your agent or from a terminal (see [Check in on a handoff](#check-in-on-a-handoff)).
 6. When the remote agent finishes, review the draft pull request on GitHub.
 
+## Watch from your phone
+
+When a handoff starts, your agent gives you a watch link and a QR code. Open it on any device, such as your phone, to follow the cloud agent live and send it messages after you close your laptop.
+
+- With OpenCode as the cloud agent, the link opens OpenCode's own web app, signed in to the sandbox's session. You can read the whole session, see the changes, and type to the agent.
+- With Claude Code, Codex, or Pi, the link opens a live page of the agent's output with a message box. Messages reach the agent when its current turn ends.
+- The link carries a secret key, so anyone who has it can watch and message the agent. Share it only with people you trust.
+- On Daytona, the link is a signed preview URL. It lasts 24 hours and renews whenever you check status. Daytona shows a one-time warning page before it; [your organization can turn that off](https://www.daytona.io/docs/en/preview-and-authentication). On E2B, the link lasts as long as the sandbox.
+- The Vercel Sandbox, SSH host, and Prime Intellect providers do not offer public URLs yet, so they have no watch link.
+
 ## Check in on a handoff
 
 Ask your agent for an update, what changed, or to tell the cloud agent something new. Or run these from the repository in a terminal. Without an ID, each command uses the newest handoff for the current repository.
@@ -112,6 +122,7 @@ Ask your agent for an update, what changed, or to tell the cloud agent something
 | `agent-handoff send [id] "message"` | Sends the cloud agent new instructions. A running agent reads them when its current turn ends and continues in the same session. A finished run resumes to answer them, then updates the result branch and pull request. |
 | `agent-handoff ssh [id]` | Opens a shell in the sandbox, in the project folder. Needs a provider with SSH. |
 | `agent-handoff attach [id]` | Opens OpenCode's live session in your terminal over an SSH tunnel, so you can watch and type into it. Quitting leaves the cloud agent running. Needs OpenCode as the cloud agent and a provider with SSH. |
+| `agent-handoff watch [id] [--open]` | Prints the watch link and its QR code. `--open` opens it in your browser. |
 | `agent-handoff stop [id]` | Stops the cloud agent and its sandbox. Pushed branches stay. |
 
 ## The handoff brief

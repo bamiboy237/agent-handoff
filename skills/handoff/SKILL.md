@@ -51,6 +51,8 @@ agent that has never seen this conversation.
      `handoff_start` with only the `brief`.
 4. End your turn immediately after `handoff_start`.
    - Write one short message saying the task is moving to the cloud.
+   - Include the watch link and QR code from the result, exactly as given. The
+     user opens it on their phone to follow the cloud agent after they leave.
    - Do not call more tools. Do not edit files. Later edits are not transferred.
 
 ## After the handoff
