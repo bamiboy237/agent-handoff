@@ -1,11 +1,13 @@
 /* agent-handoff: the page is a technical drawing of one handoff. Blue marks work
    in transit and nothing else. */
 
+/* Both fonts are subset to Latin-1, punctuation, arrows, and the demo's terminal
+   symbols, and limited to the axis ranges the page uses. */
 @font-face {
   font-family: "Archivo";
   font-style: normal;
-  font-weight: 100 900;
-  font-stretch: 62% 125%;
+  font-weight: 400 700;
+  font-stretch: 100% 112%;
   font-display: swap;
   src: url("fonts/archivo-wdth.woff2") format("woff2");
 }
@@ -13,7 +15,7 @@
 @font-face {
   font-family: "Paper Mono";
   font-style: normal;
-  font-weight: 100 900;
+  font-weight: 400 700;
   font-display: swap;
   src: url("fonts/paper-mono-wght.woff2") format("woff2");
 }
