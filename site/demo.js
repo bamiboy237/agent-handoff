@@ -1,28 +1,33 @@
-// The hero demo: one continuous story that loops.
+// The hero demo: one continuous story, started with the play button.
 //   1 Claude Code on your machine hands the task to OpenCode in the cloud
-//   2 OpenCode, running a Codex model, picks it up in the sandbox and finishes it
+//   2 OpenCode, running GPT-6.1 Sol, picks it up in the sandbox and finishes it
 //   3 Back in the same Claude Code session, the draft pull request is waiting
-// Plays only while visible. With reduced motion each scene appears finished,
-// without typing, and scenes swap with a plain fade.
+// Pressing play also allows sound, which browsers block until a click. The
+// story pauses while off screen. With reduced motion each scene appears
+// finished, without typing, and scenes swap with a plain fade.
 
 const PROMPT = "I have to go. Let OpenCode finish this in the cloud.";
 const FOLLOW_UP = "How did the handoff go?";
-const PR_URL = "https://github.com/you/billing-api/pull/12";
+const TASK = "Retry failed Stripe webhooks with backoff";
+const PR_URL = "https://github.com/you/billing-api/pull/48";
 const CLAUDE_SPINNER = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
 const HOLD_MS = 2400; // how long a finished scene stays before the next one
-const SLOWDOWN = 2.5; // stretches every pause, keystroke, and hold, so the story reads at a calm pace
+const SLOWDOWN = 3.2; // stretches every pause, keystroke, and hold toward real-life pace
+const LINE_TRAVEL_MS = 2400; // matches the diagram line's transition in styles.css
 
 const root = document.querySelector(".demo");
 if (root) {
   const screensEl = root.querySelector("[data-screens]");
   const screen = root.querySelector("[data-screen]");
   const titleEl = root.querySelector("[data-title]");
+  const playButton = root.querySelector("[data-play]");
   const instant = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   // While paused (off screen or tab hidden), waits freeze instead of ending,
   // so the story resumes where it was rather than restarting.
   const TICK_MS = 50;
-  let paused = true;
+  let paused = false;
+  let playing = false;
   let spinnerTimer;
 
   function el(tag, className, text) {
@@ -30,6 +35,87 @@ if (root) {
     if (className) node.className = className;
     if (text !== undefined) node.textContent = text;
     return node;
+  }
+
+  // Sound, synthesized so the page ships no audio files. Everything is quiet
+  // by design: it should sit under the visitor's attention, not on top of it.
+  const sound = {
+    context: undefined,
+    start() {
+      this.context ??= new AudioContext();
+      void this.context.resume();
+    },
+    get ready() {
+      return !paused && this.context?.state === "running";
+    },
+    // A filtered noise burst, close to a laptop key.
+    key(low = false) {
+      if (!this.ready) return;
+      const ctx = this.context;
+      const length = Math.floor(ctx.sampleRate * 0.03);
+      const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length) ** 3;
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      const filter = ctx.createBiquadFilter();
+      filter.type = "bandpass";
+      filter.frequency.value = (low ? 1200 : 2600) + Math.random() * 900;
+      filter.Q.value = 1.4;
+      const gain = ctx.createGain();
+      gain.gain.value = low ? 0.22 : 0.14;
+      source.connect(filter).connect(gain).connect(ctx.destination);
+      source.start();
+    },
+    tone(frequency, at, duration, volume, type = "sine") {
+      const ctx = this.context;
+      const start = ctx.currentTime + at;
+      const osc = ctx.createOscillator();
+      osc.type = type;
+      osc.frequency.value = frequency;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0, start);
+      gain.gain.linearRampToValueAtTime(volume, start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + duration + 0.02);
+    },
+    // A short tick when a tool finishes.
+    tick() {
+      if (this.ready) this.tone(1320, 0, 0.07, 0.035);
+    },
+    // A soft rising sweep while the work travels along the diagram line.
+    travel() {
+      if (!this.ready) return;
+      const ctx = this.context;
+      const start = ctx.currentTime;
+      const seconds = LINE_TRAVEL_MS / 1000;
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(220, start);
+      osc.frequency.exponentialRampToValueAtTime(440, start + seconds);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0, start);
+      gain.gain.linearRampToValueAtTime(0.03, start + seconds * 0.4);
+      gain.gain.linearRampToValueAtTime(0, start + seconds);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + seconds + 0.05);
+    },
+    // Two notes when the pull request lands.
+    chime() {
+      if (!this.ready) return;
+      this.tone(659.25, 0, 0.6, 0.05, "triangle");
+      this.tone(987.77, 0.12, 0.9, 0.045, "triangle");
+    },
+  };
+
+  // The handoff diagram above the window reads this: 0 laptop, 1 moving out,
+  // 2 sandbox, 3 moving back, 4 pull request.
+  function setStage(stage) {
+    root.dataset.stage = String(stage);
+    if (stage === 1 || stage === 3) sound.travel();
   }
 
   function wait(ms) {
@@ -61,9 +147,11 @@ if (root) {
   }
 
   async function type(target, text) {
+    if (instant) return;
     for (let i = 0; i < text.length; i++) {
       target.textContent = text.slice(0, i + 1);
       const ch = text[i];
+      if (ch !== " ") sound.key();
       await pace(ch === " " ? 65 : ch === "." ? 150 : 28 + ((text.charCodeAt(i) * 7) % 26));
     }
   }
@@ -98,12 +186,13 @@ if (root) {
     return { scroll, transcript, typed };
   }
 
-  async function submit(ui, text, className) {
+  async function submit(ui, text) {
     await pace(500);
     await type(ui.typed, text);
     await pace(350);
+    sound.key(true);
     ui.typed.textContent = "";
-    return show(ui.transcript, el("p", `line ${className}`, `> ${text}`), ui.scroll);
+    return show(ui.transcript, el("p", "line user", `> ${text}`), ui.scroll);
   }
 
   // Claude Code
@@ -120,9 +209,9 @@ if (root) {
       line.textContent = `${CLAUDE_SPINNER[i % CLAUDE_SPINNER.length]} ${label}… (${s}s · esc to interrupt)`;
     });
 
-  function claudeSays(ui, text) {
+  function claudeSays(ui, ...parts) {
     const p = el("p", "line");
-    p.append(el("span", "bullet", "●"), text);
+    p.append(el("span", "bullet", "●"), ...parts);
     return show(ui.transcript, p, ui.scroll);
   }
 
@@ -132,6 +221,7 @@ if (root) {
     show(ui.transcript, call, ui.scroll);
     await pace(runMs);
     call.classList.replace("running", "ok");
+    sound.tick();
     for (const parts of output) {
       const p = el("p", "line result");
       p.append(...parts);
@@ -140,10 +230,10 @@ if (root) {
     await pace(420);
   }
 
-  // OpenCode, in its default dark theme, running a Codex model
+  // OpenCode, in its default dark theme, running GPT-6.1 Sol
   function opencodeFrame() {
     const tabs = el("p", "oc-tabs");
-    tabs.append(el("b", "", "Add multiply and tests"));
+    tabs.append(el("b", "", TASK));
     const scroll = el("div", "scroll");
     const transcript = el("div", "transcript");
     scroll.append(transcript);
@@ -152,7 +242,7 @@ if (root) {
     prompt.append(el("span", "typed"), el("span", "cursor"));
     const mode = el("p", "oc-mode");
     const status = el("span", "oc-status");
-    mode.append(el("span", "oc-accent", "Build"), el("span", "oc-muted", " · "), el("b", "", "GPT-5 Codex"), el("span", "oc-muted", " OpenAI"), status);
+    mode.append(el("span", "oc-accent", "Build"), el("span", "oc-muted", " · "), el("b", "", "GPT-6.1 Sol"), el("span", "oc-muted", " OpenAI"), status);
     input.append(prompt, mode);
     const footer = el("p", "oc-footer");
     const keys = el("span", "oc-keys");
@@ -169,7 +259,7 @@ if (root) {
     let frame = 0;
     const draw = () => {
       const at = Math.abs(((frame++ + 6) % 12) - 6);
-      ui.status.textContent = `${"⬝".repeat(at)}■${"⬝".repeat(6 - at)}  esc interrupt`;
+      ui.status.replaceChildren(`${"⬝".repeat(at)}■${"⬝".repeat(6 - at)}`, el("span", "oc-hint", "  esc interrupt"));
     };
     draw();
     spinnerTimer = setInterval(draw, 90);
@@ -186,6 +276,7 @@ if (root) {
     p.append(el("span", "oc-muted", `${mark} `), name, " ", el("span", "oc-muted", target));
     show(ui.transcript, p, ui.scroll);
     if (block) show(ui.transcript, block, ui.scroll);
+    sound.tick();
   }
 
   function opencodeBlock(...lines) {
@@ -198,18 +289,31 @@ if (root) {
     return block;
   }
 
+  const added = (text) => [el("span", "green", `+${text}`)];
+  const removed = (text) => [el("span", "red", `-${text}`)];
+
   const SCENES = [
     {
       title: "~/code/billing-api",
       async play() {
         const ui = claudeFrame();
-        await submit(ui, PROMPT, "user");
+        setStage(0);
+        await submit(ui, PROMPT);
         await claudeSpin(ui, "Handing off", 1300);
-        claudeSays(ui, "I'll hand this to OpenCode in a cloud sandbox.");
+        claudeSays(ui, "I'll hand this to OpenCode in a cloud sandbox. Your uncommitted retry work goes with it.");
         await pace(500);
-        await claudeTool(ui, "agent-handoff - handoff_prepare (MCP)", '(targetAgent: "opencode", brief: {…})', 1000, ["⎿  Sandbox warming on daytona."]);
-        await claudeTool(ui, "agent-handoff - handoff_start (MCP)", '(handoffId: "h3k9")', 700, ["⎿  Handoff h3k9 is starting. opencode continues the work in the sandbox."]);
-        claudeSays(ui, "Your uncommitted changes are on their way. You can close your laptop.");
+        await claudeTool(
+          ui,
+          "agent-handoff - handoff_prepare (MCP)",
+          `(targetAgent: "opencode", brief: {"title": "${TASK}", …})`,
+          1000,
+          ["⎿  Sandbox warming on daytona."],
+        );
+        await claudeTool(ui, "agent-handoff - handoff_start (MCP)", '(handoffId: "h3k9")', 700, [
+          "⎿  Handoff h3k9 is starting. opencode continues the work in the sandbox.",
+        ]);
+        setStage(1);
+        claudeSays(ui, "Your changes are on their way. You can close your laptop.");
         return ui;
       },
     },
@@ -217,23 +321,57 @@ if (root) {
       title: "/home/daytona/workspace/billing-api",
       async play() {
         const ui = opencodeFrame();
-        const brief = el("p", "line oc-user", "Continue the handoff from Claude Code: add multiply() with tests, then commit.");
+        setStage(2);
+        const brief = el(
+          "p",
+          "line oc-user",
+          "Continue the handoff from Claude Code: wrap Stripe webhook processing in retries with exponential backoff, cover it with tests, then commit.",
+        );
         show(ui.transcript, brief, ui.scroll);
-        await opencodeWork(ui, 1400);
-        opencodeTool(ui, "←", "Edit", "src/math.js", opencodeBlock(
-          [el("span", "green", "+export function multiply(a, b) {")],
-          [el("span", "green", "+  return a * b;")],
-          [el("span", "green", "+}")],
-        ));
+        await opencodeWork(ui, 1200);
+        opencodeTool(ui, "→", "Read", "src/webhooks/stripe.ts");
+        await opencodeWork(ui, 900);
+        opencodeTool(
+          ui,
+          "←",
+          "Edit",
+          "src/webhooks/retry.ts",
+          opencodeBlock(
+            added("export async function withBackoff<T>(run: () => Promise<T>, attempts = 5) {"),
+            added("  for (let attempt = 1; ; attempt++) {"),
+            added("    try { return await run(); }"),
+            added("    catch (error) { if (attempt === attempts) throw error; }"),
+            added("    await sleep(250 * 2 ** attempt);"),
+          ),
+        );
+        await opencodeWork(ui, 900);
+        opencodeTool(
+          ui,
+          "←",
+          "Edit",
+          "src/webhooks/stripe.ts",
+          opencodeBlock(removed("  await processEvent(event);"), added("  await withBackoff(() => processEvent(event));")),
+        );
+        await opencodeWork(ui, 800);
+        opencodeTool(ui, "←", "Write", "test/webhooks/retry.test.ts");
+        await opencodeWork(ui, 1300);
+        opencodeTool(ui, "$", "npm test", "", opencodeBlock([el("span", "green", "✔"), " 23 passed, 0 failed (4 files)"]));
         await opencodeWork(ui, 700);
-        opencodeTool(ui, "←", "Write", "test/math.test.js");
-        await opencodeWork(ui, 1000);
-        opencodeTool(ui, "$", "npm test", "", opencodeBlock([el("span", "green", "✔"), " 6 passed, 0 failed"]));
-        await opencodeWork(ui, 700);
-        opencodeTool(ui, "$", 'git commit -am "Add multiply and tests"', "", opencodeBlock(["[handoff/h3k9-result 817641d] Add multiply and tests"]));
+        opencodeTool(
+          ui,
+          "$",
+          `git commit -am "${TASK}"`,
+          "",
+          opencodeBlock([`[handoff/h3k9-result 3f2c1e9] ${TASK}`], [" 3 files changed, 64 insertions(+), 2 deletions(-)"]),
+        );
         await opencodeWork(ui, 600);
-        show(ui.transcript, el("p", "line", "Added multiply() with tests. All 6 pass, and the work is committed."), ui.scroll);
-        show(ui.transcript, el("p", "line oc-muted", "Build · GPT-5 Codex · 41s"), ui.scroll);
+        show(
+          ui.transcript,
+          el("p", "line", "Failed webhooks now retry up to 5 times with exponential backoff. Tests pass, and the work is committed."),
+          ui.scroll,
+        );
+        show(ui.transcript, el("p", "line oc-muted", "Build · GPT-6.1 Sol · 6m 12s"), ui.scroll);
+        setStage(3);
       },
     },
     {
@@ -241,9 +379,10 @@ if (root) {
       async play(previous) {
         // The same session as scene one, so its last exchange is still on screen.
         const ui = claudeFrame();
+        setStage(4);
         for (const node of previous.transcript.children) ui.transcript.append(node.cloneNode(true));
         ui.scroll.scrollTop = ui.scroll.scrollHeight;
-        await submit(ui, FOLLOW_UP, "user");
+        await submit(ui, FOLLOW_UP);
         await claudeSpin(ui, "Checking", 900);
         await claudeTool(
           ui,
@@ -253,9 +392,8 @@ if (root) {
           ["⎿  Handoff h3k9 completed."],
           ["   Draft pull request: ", el("u", "", PR_URL)],
         );
-        const p = el("p", "line");
-        p.append(el("span", "bullet", "●"), "OpenCode finished. The draft pull request adds multiply() with 6 passing tests: ", el("u", "", PR_URL));
-        show(ui.transcript, p, ui.scroll);
+        sound.chime();
+        claudeSays(ui, "OpenCode finished. Failed Stripe webhooks now retry with backoff, and the tests pass: ", el("u", "", PR_URL));
       },
     },
   ];
@@ -273,29 +411,39 @@ if (root) {
     return playing;
   }
 
-  async function playForever() {
-    for (let loop = 0; ; loop++) {
-      let session;
-      for (let i = 0; i < SCENES.length; i++) {
-        const result = await playScene(i, session, loop > 0 || i > 0);
-        if (i === 0) session = result;
-        await wait(i === SCENES.length - 1 ? HOLD_MS * 2 : HOLD_MS);
-      }
+  // One play-through, like a video. It ends on the pull request and offers a replay.
+  let played = false;
+  async function playStory() {
+    const replay = played;
+    played = true;
+    playing = true;
+    root.dataset.state = "playing";
+    let session;
+    for (let i = 0; i < SCENES.length; i++) {
+      const result = await playScene(i, session, replay || i > 0);
+      if (i === 0) session = result;
+      if (i < SCENES.length - 1) await wait(HOLD_MS);
     }
+    playing = false;
+    root.dataset.state = "ended";
+    playButton.querySelector("[data-play-label]").textContent = "Replay";
   }
 
-  // Draw the first frame now, so the window is never empty before it plays.
-  titleEl.textContent = SCENES[0].title;
-  claudeFrame();
+  playButton.addEventListener("click", () => {
+    if (playing) return;
+    sound.start();
+    void playStory();
+  });
 
-  let visible = false;
-  let started = false;
+  // The poster frame: the first scene with its prompt ready to send.
+  titleEl.textContent = SCENES[0].title;
+  claudeFrame().typed.textContent = PROMPT;
+
+  let visible = true;
   const update = () => {
     paused = !visible || document.hidden;
-    if (!paused && !started) {
-      started = true;
-      playForever();
-    }
+    if (paused) void sound.context?.suspend();
+    else if (playing) void sound.context?.resume();
   };
   new IntersectionObserver(
     ([entry]) => {
