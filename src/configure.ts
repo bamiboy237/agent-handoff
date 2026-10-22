@@ -3,9 +3,9 @@
 // agents installed on this machine, and install the handoff skill. The prompts
 // and flow follow `npx skills add` (vercel-labs/skills).
 import { execFile } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify, styleText } from "node:util";
 import * as p from "@clack/prompts";
@@ -88,8 +88,9 @@ const CLOUD_AGENTS: CloudAgentChoice[] = [
 interface AgentRegistration {
   label: string;
   binary: string;
-  // Undefined for agents that connect by URL instead of a stdio command.
-  args?: string[];
+  // The `mcp add` arguments for a server entry point. Undefined for agents that
+  // connect by URL instead of a stdio command.
+  args?: (entry: string) => string[];
   // For editors with no `mcp add` command: the JSON file that lists their MCP
   // servers. The editor counts as installed when the file's directory exists.
   configFile?: ConfigFile;
@@ -116,25 +117,25 @@ const REGISTRATIONS: Record<string, AgentRegistration> = {
   opencode: {
     label: "OpenCode",
     binary: "opencode",
-    args: ["mcp", "add", "agent-handoff", "--", "node", SERVER_ENTRY],
+    args: (entry) => ["mcp", "add", "agent-handoff", "--", "node", entry],
     skills: { global: join(xdgConfigHome, "opencode", "skills"), project: join(".agents", "skills") },
   },
   claude: {
     label: "Claude Code",
     binary: "claude",
-    args: ["mcp", "add", "--scope", "user", "agent-handoff", "--", "node", SERVER_ENTRY],
+    args: (entry) => ["mcp", "add", "--scope", "user", "agent-handoff", "--", "node", entry],
     skills: { global: join(claudeHome, "skills"), project: join(".claude", "skills") },
   },
   codex: {
     label: "Codex",
     binary: "codex",
-    args: ["mcp", "add", "agent-handoff", "--", "node", SERVER_ENTRY],
+    args: (entry) => ["mcp", "add", "agent-handoff", "--", "node", entry],
     skills: { global: join(homedir(), ".agents", "skills"), project: join(".agents", "skills") },
   },
   pi: {
     label: "Pi",
     binary: "pi",
-    args: ["mcp", "add", "agent-handoff", "--", "node", SERVER_ENTRY],
+    args: (entry) => ["mcp", "add", "agent-handoff", "--", "node", entry],
     skills: { global: join(homedir(), ".agents", "skills"), project: join(".agents", "skills") },
   },
   "prime-agent": { label: "Prime Agent", binary: "prime-agent" },
@@ -163,19 +164,46 @@ async function nodePath(): Promise<string> {
   }
 }
 
-async function serverEntry(file: ConfigFile): Promise<Record<string, unknown>> {
-  return file.entry(await nodePath(), [SERVER_ENTRY]);
+async function serverEntry(file: ConfigFile, entry: string): Promise<Record<string, unknown>> {
+  return file.entry(await nodePath(), [entry]);
+}
+
+// npx runs setup from its cache (~/.npm/_npx/<hash>), which npm may clear or replace
+// at any time. Registering that path would leave agents pointing at nothing, so setup
+// copies the whole npx install, dependencies included, to a stable folder and
+// registers the copy. A source checkout is already stable and is registered as is.
+const installDir =
+  process.platform === "win32"
+    ? join(process.env.LOCALAPPDATA?.trim() || join(homedir(), "AppData", "Local"), "agent-handoff")
+    : join(process.env.XDG_DATA_HOME?.trim() || join(homedir(), ".local", "share"), "agent-handoff");
+
+function npxInstallRoot(): string | undefined {
+  const marker = `${sep}_npx${sep}`;
+  const at = SERVER_ENTRY.indexOf(marker);
+  if (at === -1) return undefined;
+  const end = SERVER_ENTRY.indexOf(sep, at + marker.length);
+  return end === -1 ? undefined : SERVER_ENTRY.slice(0, end);
+}
+
+// Copies into a fresh folder first, so a failed copy never leaves a half-written install.
+function installServer(root: string): string {
+  const staging = `${installDir}.new`;
+  rmSync(staging, { recursive: true, force: true });
+  cpSync(root, staging, { recursive: true });
+  rmSync(installDir, { recursive: true, force: true });
+  renameSync(staging, installDir);
+  return join(installDir, relative(root, SERVER_ENTRY));
 }
 
 // Zed's settings may hold comments and trailing commas.
 // Editing in place keeps the user's comments and formatting, which re-serializing
 // would drop. Running setup again replaces the agent-handoff entry.
-async function registerInConfigFile(file: ConfigFile): Promise<void> {
+async function registerInConfigFile(file: ConfigFile, entry: string): Promise<void> {
   const text = existsSync(file.path) ? readFileSync(file.path, "utf8") : "{}\n";
   const errors: ParseError[] = [];
   parse(text, errors, { allowTrailingComma: true });
   if (errors.length > 0) throw new Error(`${file.path} could not be parsed`);
-  const edits = modify(text, [file.serversKey, "agent-handoff"], await serverEntry(file), {
+  const edits = modify(text, [file.serversKey, "agent-handoff"], await serverEntry(file, entry), {
     formattingOptions: { insertSpaces: true, tabSize: 2, eol: "\n" },
   });
   mkdirSync(dirname(file.path), { recursive: true });
@@ -380,11 +408,13 @@ export async function runSetup(): Promise<void> {
     skillTargets.set(dir, [...(skillTargets.get(dir) ?? []), agentOf(name).label]);
   }
 
+  const npxRoot = npxInstallRoot();
   const summary = [
     `Provider: ${provider.name}${config.ssh ? ` (${config.ssh.host})` : ""}`,
     `Keys to save: ${Object.keys(secrets).join(", ") || "none"}`,
     `Cloud agents: ${cloudAgents.map((name) => CLOUD_AGENTS.find((agent) => agent.name === name)?.label).join(", ")} (default ${config.targetAgent})`,
     `MCP server: ${registerAgents.map((name) => agentOf(name).label).join(", ") || "not registered"}`,
+    ...(npxRoot && registerAgents.length > 0 ? [`Install folder: ${installDir}`] : []),
     ...(skillTargets.size > 0
       ? [`Handoff skill (${skillScope}):`, ...[...skillTargets].map(([dir, labels]) => `  ${labels.join(", ")}: ${dir}`)]
       : ["Handoff skill: not installed"]),
@@ -402,6 +432,21 @@ export async function runSetup(): Promise<void> {
   saveSpin.stop("Saved settings");
   results.push(`Keys are in ${secretsPath()} (readable only by you).`);
 
+  let entry = SERVER_ENTRY;
+  if (npxRoot && registerAgents.length > 0) {
+    const spin = p.spinner();
+    spin.start("Installing agent-handoff");
+    try {
+      entry = installServer(npxRoot);
+      spin.stop(`Installed agent-handoff to ${installDir}`);
+    } catch (error) {
+      spin.error("Could not install agent-handoff outside the npx cache");
+      failures.push(
+        `${error instanceof Error ? error.message : String(error)}. Agents point at the npx cache, which npm may clear. Run setup again to fix it.`,
+      );
+    }
+  }
+
   for (const name of registerAgents) {
     const { label, binary, args, configFile } = agentOf(name);
     if (!args && !configFile) {
@@ -411,15 +456,15 @@ export async function runSetup(): Promise<void> {
     const spin = p.spinner();
     spin.start(`Registering with ${label}`);
     try {
-      if (configFile) await registerInConfigFile(configFile);
-      else if (args) await execFileAsync(binary, args);
+      if (configFile) await registerInConfigFile(configFile, entry);
+      else if (args) await execFileAsync(binary, args(entry));
       spin.stop(`Registered with ${label}`);
     } catch (error) {
       spin.error(`Could not register with ${label}`);
       failures.push(
         configFile
-          ? `${error instanceof Error ? error.message : String(error)}. Add this under "${configFile.serversKey}" in ${configFile.path} yourself:\n  "agent-handoff": ${JSON.stringify(await serverEntry(configFile))}`
-          : `Run it yourself: ${binary} ${args?.join(" ")}`,
+          ? `${error instanceof Error ? error.message : String(error)}. Add this under "${configFile.serversKey}" in ${configFile.path} yourself:\n  "agent-handoff": ${JSON.stringify(await serverEntry(configFile, entry))}`
+          : `Run it yourself: ${binary} ${args?.(entry).join(" ")}`,
       );
     }
   }
