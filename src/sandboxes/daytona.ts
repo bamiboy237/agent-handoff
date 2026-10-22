@@ -1,4 +1,4 @@
-import { Daytona, type Sandbox } from "@daytonaio/sdk";
+import type { Daytona, Sandbox } from "@daytonaio/sdk";
 import type { Env } from "../agents/remote.js";
 import type { ProviderCapabilities, SshDetails } from "../contract.js";
 import type {
@@ -18,7 +18,7 @@ const SSH_MINUTES = 24 * 60;
 export class DaytonaSandboxes implements SandboxAdapter {
   readonly name = "daytona";
   readonly capabilities: ProviderCapabilities = { ssh: true, cache: true, keepAlive: "heartbeat" };
-  private client?: Daytona;
+  private client?: Promise<Daytona>;
 
   constructor(private readonly env: Env) {}
 
@@ -27,24 +27,29 @@ export class DaytonaSandboxes implements SandboxAdapter {
     return "DAYTONA_API_KEY is not set. Run `agent-handoff setup` or add it to the agent-handoff secrets file.";
   }
 
-  private daytona(): Daytona {
-    this.client ??= new Daytona({
-      apiKey: this.env.DAYTONA_API_KEY,
-      jwtToken: this.env.DAYTONA_JWT_TOKEN,
-      organizationId: this.env.DAYTONA_ORGANIZATION_ID,
-      apiUrl: this.env.DAYTONA_API_URL,
-      target: this.env.DAYTONA_TARGET,
-    });
+  // The SDK takes about 175 ms to load, so it loads on first use instead of each
+  // time an agent starts the server.
+  private daytona(): Promise<Daytona> {
+    this.client ??= import("@daytonaio/sdk").then(
+      ({ Daytona }) =>
+        new Daytona({
+          apiKey: this.env.DAYTONA_API_KEY,
+          jwtToken: this.env.DAYTONA_JWT_TOKEN,
+          organizationId: this.env.DAYTONA_ORGANIZATION_ID,
+          apiUrl: this.env.DAYTONA_API_URL,
+          target: this.env.DAYTONA_TARGET,
+        }),
+    );
     return this.client;
   }
 
-  private get(sandboxId: string): Promise<Sandbox> {
-    return this.daytona().get(sandboxId);
+  private async get(sandboxId: string): Promise<Sandbox> {
+    return (await this.daytona()).get(sandboxId);
   }
 
   private async snapshotIsActive(name: string): Promise<boolean> {
     try {
-      const snapshot = await this.daytona().snapshot.get(name);
+      const snapshot = await (await this.daytona()).snapshot.get(name);
       return snapshot.state === "active";
     } catch {
       // Not found is the normal case for a first handoff. Any other problem
@@ -55,7 +60,7 @@ export class DaytonaSandboxes implements SandboxAdapter {
 
   async create(options: CreateSandboxOptions): Promise<CreatedSandbox> {
     const cacheHit = options.cacheSnapshot ? await this.snapshotIsActive(options.cacheSnapshot) : false;
-    const sandbox = await this.daytona().create(
+    const sandbox = await (await this.daytona()).create(
       {
         ...(cacheHit ? { snapshot: options.cacheSnapshot } : {}),
         envVars: options.env,

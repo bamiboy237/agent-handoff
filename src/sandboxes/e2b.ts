@@ -1,7 +1,10 @@
-import { CommandExitError, Sandbox } from "e2b";
+import type { Sandbox } from "e2b";
 import type { Env } from "../agents/remote.js";
 import type { ProviderCapabilities } from "../contract.js";
 import type { CreateSandboxOptions, CreatedSandbox, ExecResult, SandboxAdapter, SandboxState } from "./sandbox.js";
+
+// The SDK loads on first use, so a server that never touches E2B never pays for it.
+const sdk = () => import("e2b");
 
 // Hobby sandboxes run at most 1 hour, Pro at most 24. Raise this on Pro.
 const DEFAULT_LIFETIME_MINUTES = 60;
@@ -22,11 +25,12 @@ export class E2bSandboxes implements SandboxAdapter {
     return "E2B_API_KEY is not set. Run `agent-handoff setup` or add it to the agent-handoff secrets file.";
   }
 
-  private connect(sandboxId: string): Promise<Sandbox> {
-    return Sandbox.connect(sandboxId, { apiKey: this.env.E2B_API_KEY });
+  private async connect(sandboxId: string): Promise<Sandbox> {
+    return (await sdk()).Sandbox.connect(sandboxId, { apiKey: this.env.E2B_API_KEY });
   }
 
   async create(options: CreateSandboxOptions): Promise<CreatedSandbox> {
+    const { Sandbox } = await sdk();
     const opts = {
       apiKey: this.env.E2B_API_KEY,
       envs: options.env,
@@ -51,6 +55,7 @@ export class E2bSandboxes implements SandboxAdapter {
 
   async exec(sandboxId: string, command: string, timeoutSeconds: number): Promise<ExecResult> {
     const sandbox = await this.connect(sandboxId);
+    const { CommandExitError } = await sdk();
     try {
       const result = await sandbox.commands.run(command, { timeoutMs: timeoutSeconds * 1000 });
       return { exitCode: result.exitCode, output: result.stdout + result.stderr };
@@ -73,12 +78,12 @@ export class E2bSandboxes implements SandboxAdapter {
   }
 
   async saveCache(sandboxId: string, name: string): Promise<void> {
-    await Sandbox.createSnapshot(sandboxId, { apiKey: this.env.E2B_API_KEY, name });
+    await (await sdk()).Sandbox.createSnapshot(sandboxId, { apiKey: this.env.E2B_API_KEY, name });
   }
 
   async state(sandboxId: string): Promise<SandboxState> {
     try {
-      const info = await Sandbox.getInfo(sandboxId, { apiKey: this.env.E2B_API_KEY });
+      const info = await (await sdk()).Sandbox.getInfo(sandboxId, { apiKey: this.env.E2B_API_KEY });
       return info.state === "paused" ? "stopped" : info.state;
     } catch {
       return "missing";
@@ -86,10 +91,10 @@ export class E2bSandboxes implements SandboxAdapter {
   }
 
   async stop(sandboxId: string): Promise<void> {
-    await Sandbox.pause(sandboxId, { apiKey: this.env.E2B_API_KEY });
+    await (await sdk()).Sandbox.pause(sandboxId, { apiKey: this.env.E2B_API_KEY });
   }
 
   async remove(sandboxId: string): Promise<void> {
-    await Sandbox.kill(sandboxId, { apiKey: this.env.E2B_API_KEY });
+    await (await sdk()).Sandbox.kill(sandboxId, { apiKey: this.env.E2B_API_KEY });
   }
 }

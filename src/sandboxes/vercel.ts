@@ -1,7 +1,10 @@
-import { Sandbox } from "@vercel/sandbox";
+import type { Sandbox } from "@vercel/sandbox";
 import type { Env } from "../agents/remote.js";
 import type { ProviderCapabilities } from "../contract.js";
 import type { CreateSandboxOptions, CreatedSandbox, ExecResult, SandboxAdapter, SandboxState } from "./sandbox.js";
+
+// The SDK takes about 145 ms to load, so it loads on first use.
+const sdk = () => import("@vercel/sandbox");
 
 // Hobby sandboxes run at most 45 minutes, Pro at most 24 hours. Raise this on Pro.
 const DEFAULT_LIFETIME_MINUTES = 45;
@@ -30,13 +33,13 @@ export class VercelSandboxes implements SandboxAdapter {
     return token && teamId && projectId ? { token, teamId, projectId } : {};
   }
 
-  private get(name: string): Promise<Sandbox> {
-    return Sandbox.get({ name, ...this.credentials() });
+  private async get(name: string): Promise<Sandbox> {
+    return (await sdk()).Sandbox.get({ name, ...this.credentials() });
   }
 
   async create(options: CreateSandboxOptions): Promise<CreatedSandbox> {
     const name = `agent-handoff-${options.handoffId}`;
-    const sandbox = await Sandbox.create({
+    const sandbox = await (await sdk()).Sandbox.create({
       name,
       env: options.env,
       tags: options.labels,

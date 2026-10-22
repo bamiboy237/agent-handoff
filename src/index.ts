@@ -3,16 +3,16 @@
 //   agent-handoff               MCP server over stdio (what agents launch)
 //   agent-handoff --http <port> MCP server over streamable HTTP on localhost
 //   agent-handoff setup         choose a sandbox provider and register the server with agents
+// Each mode imports only what it uses, so `setup` starts without loading the server.
 import { createServer as createHttpServer } from "node:http";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { createServer } from "./server.js";
 
 const MCP_PATH = "/mcp";
 
 // Stateless: each request gets its own server and transport. Handoff state
 // lives in files, so nothing is lost between requests.
-function serveHttp(port: number): void {
+async function serveHttp(port: number): Promise<void> {
+  const { createServer } = await import("./server.js");
+  const { StreamableHTTPServerTransport } = await import("@modelcontextprotocol/sdk/server/streamableHttp.js");
   const http = createHttpServer(async (req, res) => {
     if (req.url !== MCP_PATH) {
       res.writeHead(404).end();
@@ -49,8 +49,10 @@ if (command === "setup") {
     console.error("usage: agent-handoff --http <port>");
     process.exit(2);
   }
-  serveHttp(port);
+  await serveHttp(port);
 } else if (command === undefined) {
+  const { createServer } = await import("./server.js");
+  const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
   await createServer().connect(new StdioServerTransport());
 } else {
   console.error("usage: agent-handoff [setup | --http <port>]");
