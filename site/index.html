@@ -1,25 +1,23 @@
 <!doctype html>
-<html lang="en" style="color-scheme: dark">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>agent-handoff</title>
-    <meta name="description" content="Hand off your coding agent to the cloud, then close your laptop." />
+    <meta name="description" content="Hand off your coding agent to the cloud." />
     <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#0c0d0f" />
+    <meta name="theme-color" content="#0a0c10" />
     <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
-    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka-charon-mono@5.3.0/400.css" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka-charon-mono@5.3.0/700.css" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-serif@5.3.0/400-italic.css" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-serif@5.3.0/500.css" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-sans@5.3.0/400.css" />
+    <link rel="preload" href="fonts/archivo-wdth.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="fonts/iosevka-charon-mono-400.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="styles.css" />
     <script src="main.js" defer></script>
     <script src="demo.js" defer></script>
   </head>
   <body>
-    <header class="nav column">
+    <div class="grid-backdrop" aria-hidden="true"></div>
+
+    <header class="nav sheet">
       <a class="brand" href="./" translate="no">
         <img src="assets/logo.svg" width="18" height="18" alt="" />agent-handoff
       </a>
@@ -30,8 +28,8 @@
     </header>
 
     <main>
-      <section class="hero column">
-        <h1>Hand off your coding agent to the cloud, then close your laptop.</h1>
+      <section class="hero sheet">
+        <h1>Hand off your coding agent to the cloud.</h1>
         <div class="command" id="install">
           <code translate="no"><span class="dollar">$</span> npx github:bamiboy237/agent-handoff setup</code>
           <button class="copy" type="button" data-copy="npx github:bamiboy237/agent-handoff setup">
@@ -40,20 +38,38 @@
         </div>
       </section>
 
-      <section class="demo" aria-label="Demo">
-        <p class="sr-only">Claude Code hands a task to OpenCode in a cloud sandbox. OpenCode finishes it with a Codex model, and the same Claude Code session reports the draft pull request.</p>
-        <div class="window" aria-hidden="true">
-          <div class="chrome">
-            <span class="lights"><i></i><i></i><i></i></span>
-            <span class="window-title" data-title translate="no">~/code/billing-api</span>
-          </div>
-          <div class="screens" data-screens translate="no">
-            <div class="screen" data-screen></div>
+      <section class="demo sheet" aria-label="Demo" data-stage="0">
+        <p class="sr-only">Claude Code hands a task to OpenCode in a cloud sandbox. OpenCode finishes it with GPT-6.1 Sol, and the same Claude Code session reports the draft pull request.</p>
+
+        <div class="handoff" aria-hidden="true" translate="no">
+          <div class="node" data-node="0"><i></i><span>laptop session</span></div>
+          <div class="span" data-span="0"><em>handoff_start</em><b><s></s></b></div>
+          <div class="node" data-node="1"><i></i><span>cloud sandbox</span></div>
+          <div class="span" data-span="1"><em>git push</em><b><s></s></b></div>
+          <div class="node" data-node="2"><i></i><span>draft PR</span></div>
+        </div>
+
+        <div class="frame">
+          <span class="crop" aria-hidden="true"></span>
+          <div class="window">
+            <div class="chrome">
+              <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="window-title" data-title translate="no" aria-hidden="true">~/code/billing-api</span>
+            </div>
+            <div class="screens" data-screens translate="no" aria-hidden="true">
+              <div class="screen" data-screen></div>
+            </div>
+            <button class="play" type="button" data-play>
+              <span class="play-pill">
+                <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 1.8v8.4c0 .5.5.8.9.5l6.6-4.2a.6.6 0 0 0 0-1L3.9 1.3c-.4-.3-.9 0-.9.5z" fill="currentColor" /></svg>
+                <span data-play-label>Play</span>
+              </span>
+            </button>
           </div>
         </div>
       </section>
 
-      <section class="questions column" aria-labelledby="questions">
+      <section class="questions sheet" aria-labelledby="questions">
         <h2 id="questions">Questions</h2>
         <dl>
           <div>
@@ -80,11 +96,9 @@
       </section>
     </main>
 
-    <footer class="footer column">
-      <div class="footer-links">
-        <span class="footer-brand" translate="no">agent-handoff</span>
-        <a href="https://github.com/bamiboy237/agent-handoff">GitHub</a>
-      </div>
+    <footer class="footer sheet">
+      <span class="footer-brand" translate="no">agent-handoff</span>
+      <a href="https://github.com/bamiboy237/agent-handoff">GitHub</a>
       <span>©2026</span>
     </footer>
   </body>
