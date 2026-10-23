@@ -51,6 +51,14 @@ npm_install_global() {
   npm install -g --prefix "$HOME/.npm-global" --no-fund --no-audit "$@" >> "$LOG_FILE" 2>&1
 }
 
+ensure_node() {
+  if node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 19) ? 0 : 1)' > /dev/null 2>&1; then return; fi
+  log "installing Node.js 22 for the handoff runner and project setup"
+  npm_install_global node@22
+  hash -r
+  log "Node.js $(node --version) is ready"
+}
+
 # True when the binary exists and, if a version is pinned, reports that version.
 agent_installed() {
   local version
@@ -82,6 +90,7 @@ install_npm_agent() {
 
 install_agent() {
   log "installing $TARGET_AGENT ${AGENT_VERSION:-latest}"
+  ensure_node
   case "$TARGET_AGENT" in
     opencode) install_opencode ;;
     claude) install_npm_agent claude @anthropic-ai/claude-code ;;
