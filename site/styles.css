@@ -23,7 +23,7 @@
   font-family: "Geist Pixel";
   font-style: normal;
   font-weight: 400;
-  font-display: swap;
+  font-display: block;
   src: url("fonts/geist-pixel-grid.woff2") format("woff2");
 }
 
@@ -66,7 +66,7 @@
   --oc-bg: #1b1b1b;
   --oc-panel: #242424;
   --oc-text: #eeeeee;
-  --oc-muted: #808080;
+  --oc-muted: #8b8b8b;
   --oc-accent: #5cb1ec;
 
   --sans: "Geist", ui-sans-serif, system-ui, sans-serif;
@@ -621,6 +621,15 @@ main > .cell + .cell {
   grid-area: 1 / 1;
 }
 
+.play:focus-visible {
+  outline: none;
+}
+
+.play:focus-visible .play-btn {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
 .icon-replay {
   display: none;
 }
@@ -998,8 +1007,6 @@ dd {
 
   .command code {
     padding: 14px 16px;
-    white-space: normal;
-    overflow-wrap: anywhere;
   }
 
   .copy {
