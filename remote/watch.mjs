@@ -650,7 +650,9 @@ function client() {
     if (body.startsWith("message: ")) {
       document.querySelector(".you.pending")?.remove();
       add(el("p", "you", body.slice(9)));
-    } else if (body.startsWith("state failed")) event("Stopped with an error", "bad", recent);
+    } else if (body.startsWith("GitHub refused the push")) event(body, "bad");
+    else if (body.startsWith("state failed:push")) return;
+    else if (body.startsWith("state failed")) event("Stopped with an error", "bad", recent);
     else if (body.startsWith("state ")) return;
     else if (/^(opened|updated)( the)? draft pull request/.test(body)) event(body.replace(/^opened/, "Opened").replace(/^updated/, "Updated"), "good");
     else if (body.startsWith("pushed ")) event("Pushed " + body.slice(7));

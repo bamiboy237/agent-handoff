@@ -99,7 +99,10 @@ export async function refreshFromSandbox(record: HandoffRecord): Promise<{ recor
     } else if (failed) {
       r.state = "failed";
       r.failedStep = `remote_${remoteState.slice("failed:".length)}`;
-      r.error = "The remote runner failed. See the remote log.";
+      r.error =
+        remoteState === "failed:push"
+          ? "GitHub refused the push of the result branch. Give GITHUB_TOKEN write access to the repository. The commits are still in the sandbox."
+          : "The remote runner failed. See the remote log.";
     }
     if (prUrl) r.prUrl = prUrl;
     r.ssh = ssh;

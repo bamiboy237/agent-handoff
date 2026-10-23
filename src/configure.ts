@@ -3,9 +3,9 @@
 // agents installed on this machine, and install the handoff skill. The prompts
 // and flow follow `npx skills add` (vercel-labs/skills).
 import { execFile } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, delimiter, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify, styleText } from "node:util";
 import * as p from "@clack/prompts";
@@ -214,6 +214,31 @@ function installServer(root: string): string {
   rmSync(installDir, { recursive: true, force: true });
   renameSync(staging, installDir);
   return join(installDir, relative(root, SERVER_ENTRY));
+}
+
+// The `agent-handoff` command for your terminal: a launcher that runs the
+// installed server entry, so `agent-handoff status` works from any folder.
+// Returns a note when the launcher's folder is not on PATH yet.
+async function installCommand(entry: string): Promise<{ path: string; note?: string }> {
+  const node = await nodePath();
+  const binDir =
+    process.platform === "win32" ? join(installDir, "bin") : join(process.env.XDG_BIN_HOME?.trim() || join(homedir(), ".local", "bin"));
+  mkdirSync(binDir, { recursive: true });
+  const path = join(binDir, process.platform === "win32" ? "agent-handoff.cmd" : "agent-handoff");
+  if (process.platform === "win32") writeFileSync(path, `@"${node}" "${entry}" %*\r\n`);
+  else {
+    writeFileSync(path, `#!/bin/sh\nexec "${node}" "${entry}" "$@"\n`);
+    chmodSync(path, 0o755);
+  }
+  const onPath = (process.env.PATH ?? "").split(delimiter).some((dir) => resolve(dir) === resolve(binDir));
+  if (onPath) return { path };
+  return {
+    path,
+    note:
+      process.platform === "win32"
+        ? `Add ${binDir} to your PATH to run agent-handoff from any terminal.`
+        : `Add ${binDir} to your PATH to run agent-handoff from any terminal, for example: echo 'export PATH="${binDir}:$PATH"' >> ~/.zshrc`,
+  };
 }
 
 // Zed's settings may hold comments and trailing commas.
@@ -477,6 +502,14 @@ export async function runSetup(): Promise<void> {
         `${error instanceof Error ? error.message : String(error)}. Agents point at the npx cache, which npm may clear. Run setup again to fix it.`,
       );
     }
+  }
+
+  try {
+    const command = await installCommand(entry);
+    results.push(`agent-handoff command: ${command.path}`);
+    if (command.note) results.push(command.note);
+  } catch (error) {
+    failures.push(`Could not install the agent-handoff command: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   for (const name of registerAgents) {

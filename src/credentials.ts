@@ -39,8 +39,16 @@ async function checkGithubAccess(token: string, githubRepo: string): Promise<str
   const response = await fetch(`https://api.github.com/repos/${githubRepo}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
   });
-  if (response.ok) return undefined;
-  return `GITHUB_TOKEN cannot access ${githubRepo} (GitHub returned ${response.status}). Grant the token access to this repository with read and write permission for contents and pull requests.`;
+  if (!response.ok) {
+    return `GITHUB_TOKEN cannot access ${githubRepo} (GitHub returned ${response.status}). Grant the token access to this repository with read and write permission for contents and pull requests.`;
+  }
+  // A token that can read but not write passes the check above, then fails the
+  // push at the end of the run. Git's push endpoint answers 403 to such a token.
+  const push = await fetch(`https://github.com/${githubRepo}.git/info/refs?service=git-receive-pack`, {
+    headers: { Authorization: `Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}` },
+  });
+  if (push.ok) return undefined;
+  return `GITHUB_TOKEN can read ${githubRepo} but cannot push to it (GitHub returned ${push.status}), so the result branch would be stranded in the sandbox. Give the token Contents read and write and Pull requests read and write on this repository.`;
 }
 
 // Collects every value the sandbox receives as an environment variable.

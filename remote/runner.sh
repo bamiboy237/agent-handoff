@@ -319,7 +319,14 @@ publish_result() {
     git add --all
     git commit --quiet -m "agent-handoff: uncommitted remote work"
   fi
-  git_auth push --quiet origin "HEAD:refs/heads/$RESULT_BRANCH"
+  # Git's own error goes to the log; a failed push ends the run as failed:push,
+  # and the commits stay in the sandbox.
+  local output
+  if ! output="$(git_auth push --quiet origin "HEAD:refs/heads/$RESULT_BRANCH" 2>&1)"; then
+    log "GitHub refused the push of $RESULT_BRANCH: $(printf '%s' "$output" | tr '\n' ' ' | head -c 400)"
+    set_state "failed:push"
+    exit 1
+  fi
   log "pushed $RESULT_BRANCH"
   create_draft_pr
 }
