@@ -184,9 +184,11 @@ run_opencode() {
   return "$status"
 }
 
+# Claude Code, Codex, and Pi write JSON events, one per line, so the watch page can
+# show each tool call. transcript.mjs reads them.
 run_claude() {
   # Claude Code refuses to skip permissions as root unless it is told it runs in a sandbox.
-  IS_SANDBOX=1 claude -p --dangerously-skip-permissions ${AGENT_MODEL:+--model "$AGENT_MODEL"} "$1" < /dev/null
+  IS_SANDBOX=1 claude -p --output-format stream-json --verbose --dangerously-skip-permissions ${AGENT_MODEL:+--model "$AGENT_MODEL"} "$1" < /dev/null
 }
 
 run_codex() {
@@ -197,11 +199,11 @@ run_codex() {
     grep -qs cli_auth_credentials_store "$HOME/.codex/config.toml" ||
       printf 'cli_auth_credentials_store = "file"\n' >> "$HOME/.codex/config.toml"
   fi
-  codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check ${AGENT_MODEL:+-m "$AGENT_MODEL"} "$1" < /dev/null
+  codex exec --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check ${AGENT_MODEL:+-m "$AGENT_MODEL"} "$1" < /dev/null
 }
 
 run_pi() {
-  pi -p ${AGENT_MODEL:+--model "$AGENT_MODEL"} "$1" < /dev/null
+  pi -p --mode json ${AGENT_MODEL:+--model "$AGENT_MODEL"} "$1" < /dev/null
 }
 
 # Each resume_* continues the session the run started, with one message.
@@ -217,15 +219,15 @@ resume_opencode() {
 }
 
 resume_claude() {
-  IS_SANDBOX=1 claude -p --continue --dangerously-skip-permissions ${AGENT_MODEL:+--model "$AGENT_MODEL"} "$1" < /dev/null
+  IS_SANDBOX=1 claude -p --continue --output-format stream-json --verbose --dangerously-skip-permissions ${AGENT_MODEL:+--model "$AGENT_MODEL"} "$1" < /dev/null
 }
 
 resume_codex() {
-  codex exec resume --last --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check ${AGENT_MODEL:+-m "$AGENT_MODEL"} "$1" < /dev/null
+  codex exec resume --last --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check ${AGENT_MODEL:+-m "$AGENT_MODEL"} "$1" < /dev/null
 }
 
 resume_pi() {
-  pi -c -p ${AGENT_MODEL:+--model "$AGENT_MODEL"} "$1" < /dev/null
+  pi -c -p --mode json ${AGENT_MODEL:+--model "$AGENT_MODEL"} "$1" < /dev/null
 }
 
 # Answers queued messages oldest first, each in the same session. A message that
@@ -255,7 +257,7 @@ start_watch_server() {
   fi
   if curl -fsS -o /dev/null -m 2 "http://127.0.0.1:$WATCH_PORT/health"; then return; fi
   HANDOFF_HOME="$HANDOFF_HOME" WATCH_PORT="$WATCH_PORT" WATCH_KEY="$WATCH_KEY" TARGET_AGENT="$TARGET_AGENT" \
-    OPENCODE_PORT="$OPENCODE_PORT" nohup node "$HANDOFF_HOME/watch.mjs" >> "$HANDOFF_HOME/watch.log" 2>&1 &
+    OPENCODE_PORT="$OPENCODE_PORT" WORKDIR="$WORKDIR" nohup node "$HANDOFF_HOME/watch.mjs" >> "$HANDOFF_HOME/watch.log" 2>&1 &
 }
 
 # Providers that stop idle sandboxes even while processes run (Daytona) get a

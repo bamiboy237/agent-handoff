@@ -16,6 +16,7 @@ import {
   findHandoff,
   openCodeServer,
   qrCode,
+  readableLog,
   refreshFromSandbox,
   remoteLog,
   remoteWork,
@@ -100,13 +101,14 @@ async function status(id?: string): Promise<void> {
 
 async function logs(id: string | undefined, follow: boolean): Promise<void> {
   let record = findHandoff(id, currentRepo());
+  const readable = await readableLog(record);
   let { text, size } = await remoteLog(record);
-  process.stdout.write(text);
+  process.stdout.write(readable(text));
   if (!follow) return;
   for (let tick = 1; ; tick++) {
     await sleep(FOLLOW_INTERVAL_MS);
     ({ text, size } = await remoteLog(record, size).then((next) => ({ text: next.text, size: next.size })));
-    process.stdout.write(text);
+    process.stdout.write(readable(text));
     // Checks the run's state every few polls and stops once it is over.
     if (tick % 5 === 0) {
       ({ record } = await refreshFromSandbox(record));

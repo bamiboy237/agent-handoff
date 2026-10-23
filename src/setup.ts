@@ -7,6 +7,7 @@ const CONFIG_FILE = ".handoff.json";
 // Shipped next to dist/, uploaded to every sandbox, and part of the cache key.
 export const RUNNER_SCRIPT = new URL("../remote/runner.sh", import.meta.url);
 export const WATCH_SCRIPT = new URL("../remote/watch.mjs", import.meta.url);
+export const TRANSCRIPT_SCRIPT = new URL("../remote/transcript.mjs", import.meta.url);
 
 interface Detector {
   lockfiles: string[];

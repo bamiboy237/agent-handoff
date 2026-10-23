@@ -104,7 +104,7 @@ export async function refreshFromSandbox(record: HandoffRecord): Promise<{ recor
     if (prUrl) r.prUrl = prUrl;
     r.ssh = ssh;
   });
-  if (remoteLog) lines.push("Remote log:", remoteLog);
+  if (remoteLog) lines.push("Remote log:", (await readableLog(record))(`${remoteLog}\n`).trimEnd());
   if (failed) {
     await provider.stop(record.sandboxId!);
     lines.push("Stopped the sandbox because the run failed. The pushed branch keeps any partial work.");
@@ -128,6 +128,51 @@ export async function remoteWork(record: HandoffRecord, fullDiff: boolean): Prom
   ].join(" && ");
   const { result } = await remoteRun(record, script, 60);
   return result.output.trimEnd();
+}
+
+interface TranscriptItem {
+  kind: "text" | "tool" | "note";
+  text?: string;
+  id?: string;
+  icon?: string;
+  title?: string;
+  meta?: string;
+  state?: string;
+  output?: string;
+}
+
+const TOOL_LABELS: Record<string, string> = { run: "$", read: "read", edit: "edit", search: "search", web: "web", agent: "agent", plan: "plan", tool: "tool" };
+
+// Turns the remote log into plain lines as it arrives. The cloud agent writes JSON
+// events; each becomes its text, or one line per tool call. Other lines pass through.
+export async function readableLog(record: HandoffRecord): Promise<(chunk: string) => string> {
+  // Shipped next to dist/ and shared with the watch page, which runs it in the sandbox.
+  const { parseLine } = (await import(new URL("../remote/transcript.mjs", import.meta.url).href)) as {
+    parseLine: (agent: string, line: string, workdir?: string) => TranscriptItem[] | undefined;
+  };
+  const shown = new Set<string>();
+  let partial = "";
+  const toolLines = (item: TranscriptItem): string[] => {
+    const lines: string[] = [];
+    if (item.title !== undefined && !shown.has(item.id!)) {
+      shown.add(item.id!);
+      lines.push(`  ${TOOL_LABELS[item.icon ?? "tool"] ?? item.icon} ${item.title}${item.meta ? `  ${item.meta}` : ""}`);
+    }
+    if (item.state === "error") lines.push(`  failed${item.output ? `: ${item.output.split("\n").at(-1)}` : ""}`);
+    return lines;
+  };
+  return (chunk) => {
+    const lines = (partial + chunk).split("\n");
+    partial = lines.pop() ?? "";
+    return lines
+      .flatMap((line) => {
+        const items = parseLine(record.targetAgent, line, record.remoteDir);
+        if (!items) return [line];
+        return items.flatMap((item) => (item.kind === "tool" ? toolLines(item) : [item.text ?? ""]));
+      })
+      .map((line) => `${line}\n`)
+      .join("");
+  };
 }
 
 // The remote log from a byte offset, plus the log's current size, so callers can follow it.
