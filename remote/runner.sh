@@ -42,13 +42,17 @@ json_string() {
 CREDENTIAL_HELPER='!f() { echo username=x-access-token; echo "password=${GITHUB_TOKEN}"; }; f'
 git_auth() { git -c credential.helper= -c credential.helper="$CREDENTIAL_HELPER" "$@"; }
 
-# Installs into the user's home when the global npm prefix is not writable, as on a plain SSH host.
-# The global prefix can be writable while a preinstalled package inside it is not
-# (Daytona ships Codex that way), so a failed global install retries in a user
-# prefix, which comes first on PATH.
+# Keep remote npm tools in one user-owned prefix that is already on PATH.
 npm_install_global() {
-  if [ -w "$(npm prefix -g)" ] && npm install -g --no-fund --no-audit "$@" >> "$LOG_FILE" 2>&1; then return; fi
   npm install -g --prefix "$HOME/.npm-global" --no-fund --no-audit "$@" >> "$LOG_FILE" 2>&1
+}
+
+ensure_node() {
+  if node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 19) ? 0 : 1)' > /dev/null 2>&1; then return; fi
+  log "installing Node.js 22 for the handoff runner and project setup"
+  npm_install_global node@22
+  hash -r
+  log "Node.js $(node --version) is ready"
 }
 
 # True when the binary exists and, if a version is pinned, reports that version.
@@ -82,6 +86,7 @@ install_npm_agent() {
 
 install_agent() {
   log "installing $TARGET_AGENT ${AGENT_VERSION:-latest}"
+  ensure_node
   case "$TARGET_AGENT" in
     opencode) install_opencode ;;
     claude) install_npm_agent claude @anthropic-ai/claude-code ;;
@@ -256,7 +261,7 @@ start_watch_server() {
     return
   fi
   if curl -fsS -o /dev/null -m 2 "http://127.0.0.1:$WATCH_PORT/health"; then return; fi
-  HANDOFF_HOME="$HANDOFF_HOME" WATCH_PORT="$WATCH_PORT" WATCH_KEY="$WATCH_KEY" TARGET_AGENT="$TARGET_AGENT" \
+  env HANDOFF_HOME="$HANDOFF_HOME" WATCH_PORT="$WATCH_PORT" WATCH_KEY="$WATCH_KEY" TARGET_AGENT="$TARGET_AGENT" \
     OPENCODE_PORT="$OPENCODE_PORT" WORKDIR="$WORKDIR" nohup node "$HANDOFF_HOME/watch.mjs" >> "$HANDOFF_HOME/watch.log" 2>&1 &
 }
 

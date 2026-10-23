@@ -76,7 +76,9 @@ const codex: RemoteAgent = {
   name: "codex",
   localVersion: () => installedVersion("codex"),
   credentials: async (env) => {
-    const picked = pick(env, ["CODEX_API_KEY", "OPENAI_API_KEY"]);
+    // codex exec reads CODEX_API_KEY. OPENAI_API_KEY alone is not a login.
+    const apiKey = env.CODEX_API_KEY || env.OPENAI_API_KEY;
+    const picked: Record<string, string> = apiKey ? { CODEX_API_KEY: apiKey } : {};
     const authFile = join(env.CODEX_HOME || join(homedir(), ".codex"), "auth.json");
     if (Object.keys(picked).length === 0 && existsSync(authFile)) {
       picked.HANDOFF_CODEX_AUTH_JSON = readFileSync(authFile).toString("base64");
