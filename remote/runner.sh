@@ -261,7 +261,7 @@ start_watch_server() {
     return
   fi
   if curl -fsS -o /dev/null -m 2 "http://127.0.0.1:$WATCH_PORT/health"; then return; fi
-  HANDOFF_HOME="$HANDOFF_HOME" WATCH_PORT="$WATCH_PORT" WATCH_KEY="$WATCH_KEY" TARGET_AGENT="$TARGET_AGENT" \
+  env HANDOFF_HOME="$HANDOFF_HOME" WATCH_PORT="$WATCH_PORT" WATCH_KEY="$WATCH_KEY" TARGET_AGENT="$TARGET_AGENT" \
     OPENCODE_PORT="$OPENCODE_PORT" WORKDIR="$WORKDIR" nohup node "$HANDOFF_HOME/watch.mjs" >> "$HANDOFF_HOME/watch.log" 2>&1 &
 }
 
