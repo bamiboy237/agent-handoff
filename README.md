@@ -130,7 +130,7 @@ prime-agent mcp add agent-handoff --url http://127.0.0.1:7878/mcp
 When a handoff starts, your agent gives you a watch link and a QR code. Open it on any device, such as your phone, to follow the cloud agent live and send it messages after you close your laptop.
 
 - With OpenCode as the cloud agent, the link opens OpenCode's own web app, signed in to the sandbox's session. You can read the whole session, see the changes, and type to the agent.
-- With Claude Code, Codex, or Pi, the link opens a live page of the agent's output with a message box. Messages reach the agent when its current turn ends.
+- With Claude Code, Codex, or Pi, the link opens a live page of the agent's messages and tool calls, with a message box. A run of tool calls folds into one line; tap it to see each call, its output, or its diff. Messages reach the agent when its current turn ends.
 - The link carries a secret key, so anyone who has it can watch and message the agent. Share it only with people you trust.
 - On Daytona, the link is a signed preview URL. It lasts 24 hours and renews whenever you check status. Daytona shows a one-time warning page before it; [your organization can turn that off](https://www.daytona.io/docs/en/preview-and-authentication). On E2B, the link lasts as long as the sandbox.
 - The Vercel Sandbox, SSH host, and Prime Intellect providers do not offer public URLs yet, so they have no watch link.
@@ -232,7 +232,6 @@ The sandbox receives these values as environment variables. A plain SSH machine 
 - Every value in the project's `.env` and `.env.local` files.
 - `GITHUB_TOKEN`.
 
-`handoff_prepare` refuses to start when GitHub rejects the token.
 
 Untracked files that are not gitignored go into the snapshot branch. `handoff_prepare` warns when such a file looks like a secret, for example `.env.production`.
 
@@ -245,7 +244,7 @@ Untracked files that are not gitignored go into the snapshot branch. `handoff_pr
    - For an agent that identifies its session (OpenCode), it waits for the turn to end, then snapshots.
    - For other agents, `handoff_start` snapshots immediately.
 5. The snapshot is one commit of committed, staged, unstaged, and new files, built with a temporary Git index. Your working tree, index, and branch stay unchanged. It is pushed as `handoff/<id>`.
-6. In the sandbox, the runner clones the branch, creates `handoff/<id>-result`, and runs the setup. The helper then saves a cache when the provider supports one.
+6. In the sandbox, the runner clones the branch, creates `handoff/<id>-result`, and runs the setup. On E2B and Prime Intellect, the helper then saves a cache before the agent starts. Daytona saves none, because imaging pauses the sandbox for minutes.
 7. The runner starts the remote agent with the brief, and with the imported session when the agent can resume it. Every permission is auto-approved inside the sandbox.
 8. When the agent finishes, the runner commits leftover changes, pushes the result branch, and opens a draft pull request against your original branch.
 
@@ -257,6 +256,6 @@ Handoff records and helper logs live in `~/.local/state/agent-handoff/`.
 - Unsaved editor buffers are not transferred. Save files before you hand off.
 - Only OpenCode sessions move in full today. Other agents continue from the brief.
 - Messages reach Claude Code, Codex, and Pi between turns, not mid-turn, because they run headless. Use `attach` with OpenCode to steer mid-turn.
-- When a remote run fails, the next status check stops its sandbox. The pushed result branch keeps any partial work.
+- When a remote run fails, the next status check stops its sandbox. The pushed result branch keeps any partial work. When the push itself fails, the commits stay only in the stopped sandbox.
 - Free tiers cap run time: 45 minutes on Vercel Hobby and 1 hour on E2B Hobby. Raise the limits with `AGENT_HANDOFF_VERCEL_LIFETIME_MINUTES` or `AGENT_HANDOFF_E2B_LIFETIME_MINUTES` on paid plans.
 - Prime Intellect has no stop or pause, so `handoff_stop` deletes the sandbox.
