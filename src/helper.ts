@@ -188,7 +188,17 @@ async function run(id: string): Promise<void> {
   });
   await runPhase("checkout", 900);
   await runPhase("setup", 3600);
+  // The cache image holds the setup so later handoffs skip it. Saving it pauses
+  // the sandbox, so the agent starts after it.
   if (record.cacheSnapshot && !record.cacheHit && sandboxes.saveCache) {
+    // The watch page shows this line, so the pause does not look like a hang.
+    await sandboxes
+      .exec(
+        record.sandboxId!,
+        `bash -c ${shellQuote(`printf '%s [cache] saving the setup for faster handoffs\\n' "$(date -u +%FT%TZ)" >> ${shellQuote(`${handoffDir()}/runner.log`)}`)}`,
+        30,
+      )
+      .catch(() => undefined);
     try {
       await sandboxes.saveCache(record.sandboxId!, record.cacheSnapshot);
       progress(`Saved cache snapshot ${record.cacheSnapshot} for later handoffs.`);

@@ -12,7 +12,6 @@ import type {
 } from "./sandbox.js";
 
 const CREATE_TIMEOUT_SECONDS = 300;
-const SNAPSHOT_TIMEOUT_SECONDS = 900;
 const AUTO_STOP_MINUTES = 30;
 const SSH_MINUTES = 24 * 60;
 // Daytona caps signed preview URLs at 24 hours; status checks renew them.
@@ -93,10 +92,9 @@ export class DaytonaSandboxes implements SandboxAdapter {
     await sandbox.process.executeSessionCommand(name, { command, runAsync: true });
   }
 
-  async saveCache(sandboxId: string, name: string): Promise<void> {
-    const sandbox = await this.get(sandboxId);
-    await sandbox.createSnapshot(name, SNAPSHOT_TIMEOUT_SECONDS);
-  }
+  // No saveCache: imaging a Daytona sandbox pauses it for about 5 minutes, which
+  // the agent would wait out. Every handoff installs the agent and packages
+  // instead. An image saved earlier is still used when it exists.
 
   // Daytona resets the auto-stop timer on preview requests, not on processes
   // running inside the sandbox, so the runner pings this URL while it works.

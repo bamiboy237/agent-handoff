@@ -22,7 +22,7 @@ It works from any agent that supports MCP and from any editor or terminal.
 
 | Provider | SSH for your editor | Reusable cache | Notes |
 | --- | --- | --- | --- |
-| Daytona | Yes | Yes | Keeps the sandbox awake with a heartbeat while the agent works |
+| Daytona | Yes | No | Keeps the sandbox awake with a heartbeat while the agent works |
 | Your own SSH machine | Yes | No | Needs key-based login, git, and Node.js on the machine |
 | E2B | No | Yes | Free tier stops runs after 1 hour, then pauses the sandbox |
 | Vercel Sandbox | No | No | Hobby tier stops runs after 45 minutes |
