@@ -14,6 +14,14 @@ export interface HandoffConfig {
   targetAgent?: string; // default remote agent; otherwise the calling agent
   targetModel?: string; // default model for the remote agent; otherwise the agent's own default
   ssh?: SshHostConfig;
+  install?: InstallChoices; // what setup registered, so `agent-handoff update` can redo it
+}
+
+// The agents the MCP server is registered with, and the folders the handoff skill
+// was copied to, as chosen in the last setup.
+export interface InstallChoices {
+  agents: string[];
+  skills: Record<string, string[]>; // skill folder -> labels of the agents that read it
 }
 
 export function configDir(): string {
@@ -34,6 +42,7 @@ export function loadConfig(): HandoffConfig {
     targetAgent: process.env.AGENT_HANDOFF_TARGET_AGENT || file.targetAgent,
     targetModel: process.env.AGENT_HANDOFF_TARGET_MODEL || file.targetModel,
     ssh: sshHost ? { host: sshHost } : file.ssh,
+    install: file.install,
   };
 }
 

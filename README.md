@@ -64,13 +64,24 @@ It works from any agent that supports MCP and from any editor or terminal.
    - asks only for the keys those agents need, and skips an agent that already has a login or a key (OpenCode uses your OpenCode login, and Codex uses `~/.codex/auth.json`);
    - when you pick more than one agent, asks which one is the default. The calling agent can still name another one for a single handoff;
    - detects the agents and editors on your machine and asks which ones get the MCP server. OpenCode, Claude Code, and Codex are registered with their own `mcp add` command. Pi and the Zed agent are registered by adding an `agent-handoff` entry to their MCP config file (`~/.pi/agent/mcp.json`, and `context_servers` in Zed's settings), which keeps your existing servers and comments. Pi gets the file because older Pi versions have no `mcp add` command. Running setup again replaces the entry instead of adding a second one;
-   - when you run setup through `npx`, copies agent-handoff to `~/.local/share/agent-handoff` (`%LOCALAPPDATA%\agent-handoff` on Windows) and registers that copy. The npx cache is temporary, so agents registered against it would break when npm clears it. Run setup again to update the copy. A source checkout is registered where it is;
+   - when you run setup through `npx`, copies agent-handoff to `~/.local/share/agent-handoff` (`%LOCALAPPDATA%\agent-handoff` on Windows) and registers that copy. The npx cache is temporary, so agents registered against it would break when npm clears it. A source checkout is registered where it is;
+   - installs an `agent-handoff` command in `~/.local/bin`, or `%LOCALAPPDATA%\agent-handoff\bin` on Windows, and tells you when that folder is not on your PATH;
    - asks which agents get the handoff skill, and whether to install it in the project or globally. Codex, Pi, and the Zed agent share the `.agents/skills` folder, so they get one copy;
    - shows a summary and asks you to confirm before it writes anything.
 
    Press Ctrl+C at any prompt to cancel without changing anything. The wizard needs an interactive terminal.
 
 3. Reload your agents so they pick up the server.
+
+### Update
+
+```sh
+agent-handoff update
+```
+
+This installs the newest agent-handoff and repeats what setup did with the choices you made then: the install copy, the command, the MCP server registration in every agent, and the handoff skill. It asks no questions. Agents that are already running switch to the new version on their next tool call, without a restart.
+
+Your first update after installing a version without `update` needs setup instead: run `npx github:bamiboy237/agent-handoff setup` once, then reload your agents. Every update after that works with the command.
 
 ### Where settings live
 
@@ -194,6 +205,8 @@ To add system packages, services, or build steps, create `.handoff.json` at the 
 ```
 
 ## Credentials
+
+`GITHUB_TOKEN` must be able to push to the repository: Contents read and write, plus Pull requests read and write. `handoff_prepare` refuses a token that can only read, because the run would end with its commits stuck in the sandbox. If a push still fails, the run ends as `failed:push`, git's error shows in the remote log and on the watch page, and the commits stay in the sandbox.
 
 The sandbox receives these values as environment variables. A plain SSH machine receives them in a file readable only by your user in the handoff's directory. They never go into the snapshot branch, the brief, or the handoff record.
 

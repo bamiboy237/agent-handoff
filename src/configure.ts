@@ -2,9 +2,9 @@
 // there, store only the keys those agents need, register the MCP server with the
 // agents installed on this machine, and install the handoff skill. The prompts
 // and flow follow `npx skills add` (vercel-labs/skills).
-import { execFile } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { execFile, spawn } from "node:child_process";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { basename, delimiter, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify, styleText } from "node:util";
@@ -186,12 +186,15 @@ const installDir =
     ? join(process.env.LOCALAPPDATA?.trim() || join(homedir(), "AppData", "Local"), "agent-handoff")
     : join(process.env.XDG_DATA_HOME?.trim() || join(homedir(), ".local", "share"), "agent-handoff");
 
-function npxInstallRoot(): string | undefined {
-  const marker = `${sep}_npx${sep}`;
-  const at = SERVER_ENTRY.indexOf(marker);
+// The folder holding node_modules/agent-handoff when this code runs from a package
+// install: the npx cache, or the temporary folder `agent-handoff update` installs
+// into. Undefined for a source checkout, and for the stable copy itself.
+function packageInstallRoot(): string | undefined {
+  const marker = `${sep}node_modules${sep}agent-handoff${sep}`;
+  const at = SERVER_ENTRY.lastIndexOf(marker);
   if (at === -1) return undefined;
-  const end = SERVER_ENTRY.indexOf(sep, at + marker.length);
-  return end === -1 ? undefined : SERVER_ENTRY.slice(0, end);
+  const root = SERVER_ENTRY.slice(0, at);
+  return resolve(root) === resolve(installDir) ? undefined : root;
 }
 
 // Dependencies ship source maps, type declarations, and docs that nothing loads at
@@ -279,6 +282,83 @@ function answer<T>(value: T): Exclude<T, symbol> {
 const agentOf = (name: string) => REGISTRATIONS[name] as AgentRegistration;
 
 const dim = (text: string) => styleText("dim", text);
+
+// Installs the stable copy and the command, registers the MCP server with each
+// agent, and copies the handoff skill. Setup runs it after its questions;
+// `agent-handoff update` runs it with the choices setup saved.
+async function applyInstall(
+  registerAgents: string[],
+  skillTargets: Map<string, string[]>,
+): Promise<{ results: string[]; failures: string[] }> {
+  const results: string[] = [];
+  const failures: string[] = [];
+  const packageRoot = packageInstallRoot();
+
+  let entry = SERVER_ENTRY;
+  if (packageRoot) {
+    const spin = p.spinner();
+    spin.start("Installing agent-handoff");
+    try {
+      entry = installServer(packageRoot);
+      spin.stop(`Installed agent-handoff to ${installDir}`);
+    } catch (error) {
+      spin.error("Could not install agent-handoff outside the npx cache");
+      failures.push(
+        `${error instanceof Error ? error.message : String(error)}. Agents point at the npx cache, which npm may clear. Run setup again to fix it.`,
+      );
+    }
+  }
+
+  try {
+    const command = await installCommand(entry);
+    results.push(`agent-handoff command: ${command.path}`);
+    if (command.note) results.push(command.note);
+  } catch (error) {
+    failures.push(`Could not install the agent-handoff command: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  for (const name of registerAgents) {
+    const { label, binary, args, configFile } = agentOf(name);
+    if (!args && !configFile) {
+      results.push(PRIME_AGENT_HINT);
+      continue;
+    }
+    const spin = p.spinner();
+    spin.start(`Registering with ${label}`);
+    try {
+      if (configFile) await registerInConfigFile(configFile, entry);
+      // A timeout, so an agent that waits for input cannot hang setup.
+      else if (args) await execFileAsync(binary, args(entry), { timeout: 30_000 });
+      spin.stop(`Registered with ${label}`);
+    } catch (error) {
+      spin.error(`Could not register with ${label}`);
+      failures.push(
+        configFile
+          ? `${error instanceof Error ? error.message : String(error)}. Add this under "${configFile.serversKey}" in ${configFile.path} yourself:\n  "agent-handoff": ${JSON.stringify(await serverEntry(configFile, entry))}`
+          : `Run it yourself: ${binary} ${args?.(entry).join(" ")}`,
+      );
+    }
+  }
+
+  if (skillTargets.size > 0) {
+    const spin = p.spinner();
+    spin.start("Installing the handoff skill");
+    const failuresBefore = failures.length;
+    for (const [dir, labels] of skillTargets) {
+      try {
+        mkdirSync(dir, { recursive: true });
+        cpSync(SKILL_DIR, join(dir, "handoff"), { recursive: true });
+        results.push(`Skill installed for ${labels.join(", ")}: ${join(dir, "handoff")}`);
+      } catch (error) {
+        failures.push(`Skill not installed in ${dir}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (failures.length > failuresBefore) spin.error("Could not install the handoff skill everywhere");
+    else spin.stop("Installed the handoff skill");
+  }
+
+  return { results, failures };
+}
 
 export async function runSetup(): Promise<void> {
   // Prompts wait for keystrokes forever when stdin is not a terminal, so stop early.
@@ -465,13 +545,13 @@ export async function runSetup(): Promise<void> {
     skillTargets.set(dir, [...(skillTargets.get(dir) ?? []), agentOf(name).label]);
   }
 
-  const npxRoot = npxInstallRoot();
+  const packageRoot = packageInstallRoot();
   const summary = [
     `Provider: ${provider.name}${config.ssh ? ` (${config.ssh.host})` : ""}`,
     `Keys to save: ${Object.keys(secrets).join(", ") || "none"}`,
     `Cloud agents: ${cloudAgents.map((name) => CLOUD_AGENTS.find((agent) => agent.name === name)?.label).join(", ")} (default ${config.targetAgent}${config.targetModel ? `, model ${config.targetModel}` : ""})`,
     `MCP server: ${registerAgents.map((name) => agentOf(name).label).join(", ") || "not registered"}`,
-    ...(npxRoot && registerAgents.length > 0 ? [`Install folder: ${installDir}`] : []),
+    ...(packageRoot ? [`Install folder: ${installDir}`] : []),
     ...(skillTargets.size > 0
       ? [`Handoff skill (${skillScope}):`, ...[...skillTargets].map(([dir, labels]) => `  ${labels.join(", ")}: ${dir}`)]
       : ["Handoff skill: not installed"]),
@@ -489,70 +569,64 @@ export async function runSetup(): Promise<void> {
   saveSpin.stop("Saved settings");
   results.push(`Keys are in ${secretsPath()} (readable only by you).`);
 
-  let entry = SERVER_ENTRY;
-  if (npxRoot && registerAgents.length > 0) {
-    const spin = p.spinner();
-    spin.start("Installing agent-handoff");
-    try {
-      entry = installServer(npxRoot);
-      spin.stop(`Installed agent-handoff to ${installDir}`);
-    } catch (error) {
-      spin.error("Could not install agent-handoff outside the npx cache");
-      failures.push(
-        `${error instanceof Error ? error.message : String(error)}. Agents point at the npx cache, which npm may clear. Run setup again to fix it.`,
-      );
-    }
-  }
-
-  try {
-    const command = await installCommand(entry);
-    results.push(`agent-handoff command: ${command.path}`);
-    if (command.note) results.push(command.note);
-  } catch (error) {
-    failures.push(`Could not install the agent-handoff command: ${error instanceof Error ? error.message : String(error)}`);
-  }
-
-  for (const name of registerAgents) {
-    const { label, binary, args, configFile } = agentOf(name);
-    if (!args && !configFile) {
-      results.push(PRIME_AGENT_HINT);
-      continue;
-    }
-    const spin = p.spinner();
-    spin.start(`Registering with ${label}`);
-    try {
-      if (configFile) await registerInConfigFile(configFile, entry);
-      // A timeout, so an agent that waits for input cannot hang setup.
-      else if (args) await execFileAsync(binary, args(entry), { timeout: 30_000 });
-      spin.stop(`Registered with ${label}`);
-    } catch (error) {
-      spin.error(`Could not register with ${label}`);
-      failures.push(
-        configFile
-          ? `${error instanceof Error ? error.message : String(error)}. Add this under "${configFile.serversKey}" in ${configFile.path} yourself:\n  "agent-handoff": ${JSON.stringify(await serverEntry(configFile, entry))}`
-          : `Run it yourself: ${binary} ${args?.(entry).join(" ")}`,
-      );
-    }
-  }
-
-  if (skillTargets.size > 0) {
-    const spin = p.spinner();
-    spin.start("Installing the handoff skill");
-    const failuresBefore = failures.length;
-    for (const [dir, labels] of skillTargets) {
-      try {
-        mkdirSync(dir, { recursive: true });
-        cpSync(SKILL_DIR, join(dir, "handoff"), { recursive: true });
-        results.push(`Skill installed for ${labels.join(", ")}: ${join(dir, "handoff")}`);
-      } catch (error) {
-        failures.push(`Skill not installed in ${dir}: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
-    if (failures.length > failuresBefore) spin.error("Could not install the handoff skill everywhere");
-    else spin.stop("Installed the handoff skill");
-  }
+  const applied = await applyInstall(registerAgents, skillTargets);
+  results.push(...applied.results);
+  failures.push(...applied.failures);
+  config.install = { agents: registerAgents, skills: Object.fromEntries(skillTargets) };
+  saveConfig(config);
 
   p.note(results.join("\n"), "Result");
   for (const failure of failures) p.log.error(failure);
   p.outro("Done. Reload your agents so they pick up the server.");
+}
+
+const UPDATE_SOURCE = "github:bamiboy237/agent-handoff";
+
+// `agent-handoff update` installs the newest agent-handoff into a temporary folder,
+// then runs that version with --apply. The new version redoes setup's work with
+// the choices setup saved: the stable copy, the command, every agent registration,
+// and every skill folder. Running MCP servers swap to the new code on their next
+// call (see supervisor.ts), so no agent needs a restart.
+export async function runUpdate(args: string[]): Promise<void> {
+  const choices = loadConfig().install;
+  if (!choices) {
+    console.error("Run agent-handoff setup first. Update repeats the choices setup saves.");
+    process.exitCode = 1;
+    return;
+  }
+
+  if (args.includes("--apply")) {
+    const { results, failures } = await applyInstall(choices.agents, new Map(Object.entries(choices.skills)));
+    for (const line of results) p.log.info(line);
+    for (const failure of failures) p.log.error(failure);
+    if (failures.length > 0) process.exitCode = 1;
+    else p.log.success("agent-handoff is up to date. Running agents use the new version on their next call.");
+    return;
+  }
+
+  // AGENT_HANDOFF_UPDATE_SOURCE takes any npm install spec, such as a packed tarball to test with.
+  const source = process.env.AGENT_HANDOFF_UPDATE_SOURCE?.trim() || UPDATE_SOURCE;
+  const staging = mkdtempSync(join(tmpdir(), "agent-handoff-update-"));
+  try {
+    const spin = p.spinner();
+    spin.start("Downloading the latest agent-handoff");
+    try {
+      await execFileAsync("npm", ["install", "--prefix", staging, "--no-save", "--no-audit", "--no-fund", "--loglevel=error", source], {
+        shell: process.platform === "win32",
+        timeout: 10 * 60_000,
+      });
+    } catch (error) {
+      spin.error("Could not download agent-handoff");
+      throw error;
+    }
+    spin.stop("Downloaded the latest agent-handoff");
+    const entry = join(staging, "node_modules", "agent-handoff", "dist", "index.js");
+    process.exitCode = await new Promise<number>((done) => {
+      const child = spawn(process.execPath, [entry, "update", "--apply"], { stdio: "inherit" });
+      child.on("error", () => done(1));
+      child.on("exit", (code) => done(code ?? 1));
+    });
+  } finally {
+    rmSync(staging, { recursive: true, force: true });
+  }
 }
