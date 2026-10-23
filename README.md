@@ -12,7 +12,11 @@ The Zed agent hands a half-built feature to Codex in an E2B sandbox and returns 
 
 ![The Zed agent runs handoff_prepare and handoff_start, then shows a watch link and a QR code.](docs/images/handoff-in-zed.webp)
 
-On the watch page, Codex finishes the work, answers a message, pushes the result branch, and opens a draft pull request.
+On a phone, the same link follows Codex live while it works.
+
+<img src="docs/images/watch-on-phone.webp" width="320" alt="The watch page on a phone shows the sandbox setup steps, then Codex starting on the task.">
+
+Back on the watch page, Codex finishes the work, answers a message, pushes the result branch, and opens a draft pull request.
 
 ![The watch page shows Codex reporting that all 226 tests pass, a reply to a user message, the pushed branch, and the draft pull request.](docs/images/watch-page.webp)
 
