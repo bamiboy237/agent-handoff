@@ -6,6 +6,16 @@ Tell your agent something like "I need to leave, keep going in the cloud." The a
 
 It works from any agent that supports MCP and from any editor or terminal.
 
+## A real handoff
+
+The Zed agent hands a half-built feature to Codex in an E2B sandbox and returns a watch link and a QR code.
+
+![The Zed agent runs handoff_prepare and handoff_start, then shows a watch link and a QR code.](docs/images/handoff-in-zed.webp)
+
+On the watch page, Codex finishes the work, answers a message, pushes the result branch, and opens a draft pull request.
+
+![The watch page shows Codex reporting that all 226 tests pass, a reply to a user message, the pushed branch, and the draft pull request.](docs/images/watch-page.webp)
+
 ## Supported agents
 
 | Agent | Can start a handoff | Can continue in the sandbox | Moves its full session |
