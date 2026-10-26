@@ -84,13 +84,20 @@ function pairingLink() {
 // items; any other line goes out as text for the page to sort.
 function streamEvents(req, res) {
   res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
-  const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  let offset = Math.max(0, size(LOG) - BACKLOG_BYTES);
-  let midLine = offset > 0; // a backlog that starts inside a line skips that line
+  const send = (event, data, id) => res.write(`${id === undefined ? "" : `id: ${id}\n`}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  // Byte offsets resume on whole-line boundaries, even after the server restarts.
+  const cursor = req.headers["last-event-id"];
+  const resume = /^\d+$/.test(cursor ?? "") && Number.isSafeInteger(Number(cursor));
+  let offset = resume ? Number(cursor) : Math.max(0, size(LOG) - BACKLOG_BYTES);
+  let midLine = !resume && offset > 0;
   let lastStatus = "";
   const tick = () => {
     const end = size(LOG);
-    if (end < offset) offset = 0;
+    if (end < offset) {
+      offset = 0;
+      midLine = false;
+      send("reset", null, "");
+    }
     const chunk = end > offset ? readRange(LOG, offset, end) : Buffer.alloc(0);
     const cut = chunk.lastIndexOf(10);
     if (cut >= 0) {
@@ -99,7 +106,7 @@ function streamEvents(req, res) {
       if (midLine) lines.shift();
       midLine = false;
       const entries = lines.flatMap((line) => parseLine(AGENT, line, WORKDIR) ?? [line]);
-      if (entries.length) send("log", entries);
+      send("log", entries, offset);
     }
     const status = JSON.stringify({
       state: read("state") || "warming",
@@ -222,7 +229,7 @@ server.on("upgrade", (req, socket, head) => {
   socket.on("error", () => upstream.destroy());
 });
 
-server.listen(PORT, "0.0.0.0");
+server.listen(PORT, process.env.WATCH_HOST || "0.0.0.0");
 
 function page() {
   const name = escapeHtml(label);
@@ -253,42 +260,44 @@ function page() {
   --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   --session: 820px;
   --pad: 16px;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
 @media (min-width: 768px) { :root { --pad: 24px; } }
 * { box-sizing: border-box; }
-html { height: 100%; background: var(--deep); color-scheme: dark; }
+html { height: 100%; background: var(--deep); color-scheme: dark; overscroll-behavior: none; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body { height: 100vh; height: 100dvh; margin: 0; display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none; background: var(--deep); color: var(--text); font: 400 14px/22px var(--sans); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; -webkit-tap-highlight-color: transparent; }
 ::selection { background: rgba(162, 188, 255, 0.3); }
 svg { flex: none; }
 button { font: inherit; color: inherit; }
+button, .icon-button { touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* A single hairline, not a floating session card. Controls have 44px tap areas. */
 header { flex: none; padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); border-bottom: 1px solid var(--border); }
 .bar { display: flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 6px 0 16px; }
-.bar h1 { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 14px/20px var(--sans); }
-.private { display: grid; place-items: center; width: 32px; height: 44px; color: var(--muted); }
+.bar h1 { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 14px/20px var(--sans); }
 .note { margin: 0 16px 12px; color: var(--muted); }
 .ind { display: inline-flex; width: 14px; height: 16px; align-items: center; justify-content: center; color: var(--muted); }
 .ind::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .ind > svg { display: none; }
 [data-state="running"] .ind { color: var(--success); }
-[data-state="running"] .ind::before { animation: breathe 1.6s ease-in-out infinite; }
 [data-state="completed"] .ind::before, [data-state="failed"] .ind::before { display: none; }
 [data-state="completed"] .ind .ok { display: block; color: var(--success); }
 [data-state="failed"] .ind .bad { display: block; color: var(--danger); }
 .offline .ind { color: var(--danger); }
-.offline .ind::before { display: block; animation: none; }
+.offline .ind::before { display: block; }
 .offline .ind > svg { display: none; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .icon-button { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--icon); cursor: pointer; text-decoration: none; }
 .pr[hidden] { display: none; }
 .icon-button:active { background: var(--pressed); color: var(--text); }
-@media (hover: hover) { .icon-button:hover { background: var(--hover); color: var(--text); } }
+@media (hover: hover) and (pointer: fine) { .icon-button:hover:not(:disabled) { background: var(--hover); color: var(--text); } }
 
 /* Only the transcript scrolls. The composer stays above the phone's safe area. */
 .panel { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); }
+.scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); }
+.scroll:focus-visible { outline-offset: -2px; }
+.scroll, pre.code, .shell > *, pre.out, .diff { overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 
 main { max-width: var(--session); margin: 0 auto; padding: 24px var(--pad) 28px; }
 .feed { display: flex; flex-direction: column; align-items: flex-start; }
@@ -305,7 +314,7 @@ main { max-width: var(--session); margin: 0 auto; padding: 24px var(--pad) 28px;
 .prose p { margin: 0 0 14px; white-space: pre-wrap; }
 .prose strong { font-weight: 670; }
 .prose a { color: var(--accent); text-decoration: none; }
-.prose a:hover { text-decoration: underline; text-underline-offset: 2px; }
+@media (hover: hover) and (pointer: fine) { .prose a:hover { text-decoration: underline; text-underline-offset: 2px; } }
 .prose h1, .prose h2, .prose h3 { color: var(--text); line-height: 150%; }
 .prose h1 { margin: 28px 0 14px; font-size: 20px; font-weight: 400; }
 .prose h2 { margin: 24px 0 12px; font-size: 18px; font-weight: 400; }
@@ -316,51 +325,46 @@ main { max-width: var(--session); margin: 0 auto; padding: 24px var(--pad) 28px;
 .prose li { margin-bottom: 4px; }
 .prose li::marker { color: var(--muted); }
 .prose :not(pre) > code { padding: 1px 4px; border: 1px solid var(--border); border-radius: 3px; background: var(--base); font: 400 0.9em/1.5 var(--mono); }
-pre.code { margin: 14px 0 20px; padding: 12px; overflow: auto; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--base); color: var(--text); font: 400 14px/1.6 var(--mono); }
+pre.code { margin: 14px 0 20px; padding: 12px; overflow: auto; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--base); color: var(--text); font: 400 14px/1.6 var(--mono); }
 .response-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
 .copy { color: var(--faint); }
 
 /* Full-width prompts, like the reference, rather than right-aligned bubbles. */
-.you { width: 100%; margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 5px; background: var(--base); color: var(--text); font: 400 14px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.you { width: 100%; margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--base); color: var(--text); font: 400 14px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .you.pending { color: var(--muted); border-style: dashed; }
 
 /* Tool calls keep their existing folding behavior, with visible affordances. */
 .group { width: 100%; }
-.gtrig { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-height: 44px; padding: 0 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--base); color: var(--muted); font: 400 13px/18px var(--sans); text-align: start; cursor: pointer; user-select: none; -webkit-user-select: none; }
-.gl { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
-.gtrig b { display: inline-flex; align-items: center; gap: 6px; color: var(--icon); }
-.chev { display: grid; place-items: center; width: 16px; height: 16px; color: var(--faint); transform: rotate(-90deg); transition: transform 0.15s ease; }
+.gtrig { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-height: 44px; padding: 0 8px 0 2px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font: 400 13px/18px var(--sans); text-align: start; cursor: pointer; user-select: none; -webkit-user-select: none; }
+.chev { display: grid; place-items: center; width: 16px; height: 16px; color: var(--faint); transform: rotate(-90deg); }
 .group.open > .gtrig .chev { transform: none; }
-.rows { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding: 0 0 4px 12px; border-left: 1px solid var(--border); }
+.rows { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; padding: 0 0 4px 12px; border-left: 1px solid var(--border); }
 .rows[hidden] { display: none; }
 .tool { display: flex; flex-direction: column; min-width: 0; }
 .trig { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 4px 0; border: 0; background: none; font: 400 13px/18px var(--sans); text-align: start; cursor: default; user-select: none; -webkit-user-select: none; }
 .tool.has-detail .trig { cursor: pointer; }
+.gtrig:active, .tool.has-detail .trig:active { background: var(--pressed); }
+@media (hover: hover) and (pointer: fine) { .gtrig:hover, .tool.has-detail .trig:hover { background: var(--hover); } }
 .tool:not(.has-detail) .chev { visibility: hidden; }
 .label { flex: none; display: inline-flex; color: var(--icon); }
-.sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); }
-.arg { flex: none; white-space: nowrap; color: var(--faint); }
+.sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.arg { flex: none; white-space: nowrap; color: var(--faint); font-feature-settings: "tnum"; }
 .arg .add { color: var(--success); }
 .arg .del { color: var(--danger); }
 .tool.open .chev { transform: none; }
 .tool[data-state="error"] .label, .tool[data-state="error"] .sub { color: var(--danger); }
-.label.shimmer svg, .gl.shimmer svg { animation: breathe 1.6s ease-in-out infinite; }
-@keyframes breathe { 50% { opacity: 0.4; } }
-.shimmer { color: var(--muted); }
-.detail { margin-top: 8px; }
+.tool[data-state="running"] .label { color: var(--text); }
+.detail { margin-top: 4px; }
 .detail[hidden] { display: none; }
 
 /* Tool output: shell block, plain output, diff, todos. */
 .shell { border: 1px solid var(--border-strong); border-radius: 6px; overflow: hidden; background: var(--base); font: 400 13px/20px var(--mono); }
-.shell > * { display: block; margin: 0; padding: 12px; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; scrollbar-width: none; }
-.shell > *::-webkit-scrollbar { display: none; }
+.shell > * { display: block; margin: 0; padding: 12px; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .shell .cmd { color: var(--text); }
 .shell .res { border-top: 1px solid var(--border); background: var(--deep); color: var(--muted); }
-pre.out { margin: 0; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font: 440 13px/150% var(--mono); letter-spacing: -0.04px; scrollbar-width: none; }
-pre.out::-webkit-scrollbar { display: none; }
+pre.out { margin: 0; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font: 440 13px/150% var(--mono); letter-spacing: -0.04px; }
 .tool[data-state="error"] pre.out { color: var(--danger); }
-.diff { border: 1px solid var(--border-strong); border-radius: 6px; overflow: hidden; font: 400 13px/20px var(--mono); max-height: 320px; overflow-y: auto; scrollbar-width: none; }
-.diff::-webkit-scrollbar { display: none; }
+.diff { border: 1px solid var(--border-strong); border-radius: 6px; overflow: hidden; font: 400 13px/20px var(--mono); max-height: 320px; overflow-y: auto; }
 .dl { display: flex; gap: 8px; padding: 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
 .dl i { flex: none; width: 1ch; font-style: normal; }
 .dl.add { background: rgba(107, 213, 134, 0.1); }
@@ -390,37 +394,37 @@ form { position: relative; width: 100%; max-width: var(--session); margin: 0; }
 textarea { display: block; width: 100%; min-height: 88px; max-height: min(180px, 40dvh); margin: 0; padding: 16px 52px 8px var(--pad); resize: none; border: 0; border-radius: 0; background: transparent; color: var(--text); font: 400 16px/1.6 var(--mono); }
 textarea::placeholder { color: var(--faint); }
 textarea:focus-visible { outline: none; }
-form:focus-within { box-shadow: inset 0 2px 0 var(--border-strong); }
+form:focus-within { box-shadow: inset 0 2px 0 var(--focus); }
 .expand { position: absolute; top: 2px; right: 4px; }
 .actions { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 6px 4px var(--pad); color: var(--muted); font: 400 12px/18px var(--sans); }
-.agent-label { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-.agent-label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .run-state { display: inline-flex; align-items: center; gap: 4px; padding-left: 8px; border-left: 1px solid var(--border-strong); white-space: nowrap; }
 .send { position: relative; margin-left: auto; background: transparent; }
 .send::before { content: ""; position: absolute; width: 26px; height: 26px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--pressed); }
 .send svg { position: relative; }
+.send:not(:disabled) { color: var(--text); }
 .send:disabled { color: #666; cursor: not-allowed; }
 .send:disabled::before { background: var(--raised); border-color: var(--border); }
 .panel.composing form { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 .panel.composing footer { flex: 1; min-height: 0; }
 .panel.composing .scroll, .panel.composing .latest { display: none; }
 .panel.composing textarea { flex: 1; height: auto !important; max-height: none; min-height: 0; }
-.latest { position: absolute; left: 50%; bottom: calc(var(--dock) + 12px); z-index: 1; border: 1px solid var(--border-strong); background: var(--base); opacity: 0; visibility: hidden; transform: translate(-50%, 6px); pointer-events: none; transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s; }
+.latest { position: absolute; left: 50%; bottom: calc(var(--dock, 0px) + 12px); z-index: 1; border: 1px solid var(--border-strong); background: var(--base); opacity: 0; visibility: hidden; transform: translate(-50%, 6px); pointer-events: none; transition: opacity 0.15s var(--ease-out), transform 0.15s var(--ease-out), visibility 0.15s; }
 .latest.show { opacity: 1; visibility: visible; transform: translate(-50%, 0); pointer-events: auto; }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-state="running"] .ind::before, .shimmer svg { animation: none; }
-  .chev, .latest { transition: none; }
+  .latest { transition: none; transform: translate(-50%, 0); }
 }
 </style>
 </head>
 <body data-state="warming">
 <header id="header">
-  <div class="bar"><h1 id="title">${name} is getting ready</h1><span class="private" title="Private handoff · anyone with the watch link can access" role="img" aria-label="Private handoff; anyone with the watch link can access"><svg data-icon="lock"></svg></span><a class="icon-button pr" id="pr" target="_blank" rel="noopener" aria-label="Open pull request" title="Open pull request" hidden><svg data-icon="git-pull-request"></svg></a></div>
+  <div class="bar"><h1 id="title">${name} is getting ready</h1><a class="icon-button pr" id="pr" target="_blank" rel="noopener" aria-label="Open pull request" title="Open pull request" hidden><svg data-icon="git-pull-request"></svg></a></div>
   ${opencodeNote}
 </header>
 <div class="panel">
-<div class="scroll" id="scroll"><main><div class="feed" id="feed" aria-live="polite"></div></main></div>
+<div class="scroll" id="scroll" role="region" aria-label="Agent transcript" tabindex="0"><main><div class="feed" id="feed"></div></main></div>
+<p class="sr" id="activity" role="status" aria-atomic="true"></p>
 <button class="icon-button latest" id="latest" type="button" aria-label="Jump to latest" title="Jump to latest"><svg data-icon="arrow-down"></svg></button>
 <footer id="footer">
   <p class="hint" id="hint" role="status"></p>
@@ -428,7 +432,7 @@ form:focus-within { box-shadow: inset 0 2px 0 var(--border-strong); }
     <textarea id="text" rows="1" placeholder="Message ${name}…" aria-label="Message ${name}" enterkeyhint="send"></textarea>
     <button class="icon-button expand" id="expand" type="button" aria-label="Expand composer" aria-expanded="false" title="Expand composer"><svg data-icon="expand"></svg></button>
     <div class="actions">
-      <span class="agent-label"><svg data-icon="console"></svg><span>${name}</span></span>
+      <span class="agent-label">${name}</span>
       <span class="run-state"><span class="ind" id="indicator" aria-hidden="true"><svg class="ok" data-icon="circle-check"></svg><svg class="bad" data-icon="warning"></svg></span><span id="state" role="status">Connecting</span></span>
       <button class="icon-button send" id="go" type="submit" aria-label="Send message" title="Send message"><svg data-icon="send"></svg></button>
     </div>
@@ -445,12 +449,12 @@ function client() {
   const feed = document.getElementById("feed");
   const latest = document.getElementById("latest");
   const hint = document.getElementById("hint");
+  const activity = document.getElementById("activity");
   const states = { warming: "Getting ready", waiting_for_idle: "Getting ready", running: "Working", completed: "Done", failed: "Failed" };
 
   // Tool artwork from OpenCode (MIT); original chrome icons use the same 20px
   // view box. A 1.5px stroke renders at Zed's 1.2px weight in a 16px icon.
   const ICONS = {
-    lock: '<rect x="5" y="9" width="10" height="8" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M7 9V6a3 3 0 0 1 6 0v3m-3 3v2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
     "git-pull-request": '<g stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="4" r="2"/><circle cx="5" cy="16" r="2"/><circle cx="15" cy="16" r="2"/><path d="M5 6v8m10 0V7a3 3 0 0 0-3-3H9m3-3L9 4l3 3"/></g>',
     send: '<path d="m4 4 12 6-12 6 2-6zm2 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
     expand: '<path d="M12 3h5v5m0-5-6 6M8 17H3v-5m0 5 6-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
@@ -465,14 +469,10 @@ function client() {
     task: '<path d="M9.99992 2.0835V17.9168M7.08325 3.75016H2.08325V16.2502H7.08325M12.9166 16.2502H17.9166V3.75016H12.9166" stroke="currentColor" stroke-linecap="square"/>',
     checklist: '<path d="M9.58342 13.7498H17.0834M9.58342 6.24984H17.0834M2.91675 6.6665L4.58341 7.9165L7.08341 4.1665M2.91675 14.1665L4.58341 15.4165L7.08341 11.6665" stroke="currentColor" stroke-linecap="square"/>',
     mcp: '<g><path d="M0.972656 9.37176L9.5214 1.60019C10.7018 0.527151 12.6155 0.527151 13.7957 1.60019C14.9761 2.67321 14.9761 4.41295 13.7957 5.48599L7.3397 11.3552" stroke="currentColor" stroke-linecap="round"/><path d="M7.42871 11.2747L13.7957 5.48643C14.9761 4.41338 16.8898 4.41338 18.0702 5.48643L18.1147 5.52688C19.2951 6.59993 19.2951 8.33966 18.1147 9.4127L10.3831 16.4414C9.98966 16.7991 9.98966 17.379 10.3831 17.7366L11.9707 19.1799" stroke="currentColor" stroke-linecap="round"/><path d="M11.6587 3.54346L5.33619 9.29119C4.15584 10.3642 4.15584 12.1039 5.33619 13.177C6.51649 14.25 8.43019 14.25 9.61054 13.177L15.9331 7.42923" stroke="currentColor" stroke-linecap="round"/></g>',
-    "chevron-down": '<path d="M6.6665 8.33325L9.99984 11.6666L13.3332 8.33325" stroke="currentColor" stroke-linecap="square"/>',
-    "arrow-up": '<path fill-rule="evenodd" clip-rule="evenodd" d="M9.99991 2.24121L16.0921 8.33343L15.2083 9.21731L10.6249 4.63397V17.5001H9.37492V4.63398L4.7916 9.21731L3.90771 8.33343L9.99991 2.24121Z" fill="currentColor"/>',
     check: '<path d="M6.5 11.4412L8.97059 13.5L13.5 6.5" stroke="currentColor" stroke-linecap="square"/>',
     "circle-check": '<path d="M12.4987 7.91732L8.7487 12.5007L7.08203 10.834M17.9154 10.0007C17.9154 14.3729 14.371 17.9173 9.9987 17.9173C5.62644 17.9173 2.08203 14.3729 2.08203 10.0007C2.08203 5.6284 5.62644 2.08398 9.9987 2.08398C14.371 2.08398 17.9154 5.6284 17.9154 10.0007Z" stroke="currentColor" stroke-linecap="square"/>',
     warning: '<path d="M10 7.91667V11.6667M10 13.7417V13.75M10 2.5L1.875 16.25H18.125L10 2.5Z" stroke="currentColor" stroke-linecap="square"/>',
-    link: '<path d="M2.08334 12.0833L1.72979 11.7298L1.37624 12.0833L1.72979 12.4369L2.08334 12.0833ZM7.91668 17.9167L7.56312 18.2702L7.91668 18.6238L8.27023 18.2702L7.91668 17.9167ZM17.9167 7.91666L18.2702 8.27022L18.6238 7.91666L18.2702 7.56311L17.9167 7.91666ZM12.0833 2.08333L12.4369 1.72977L12.0833 1.37622L11.7298 1.72977L12.0833 2.08333ZM8.39646 5.06311L8.0429 5.41666L8.75001 6.12377L9.10356 5.77021L8.75001 5.41666L8.39646 5.06311ZM5.77023 9.10355L6.12378 8.74999L5.41668 8.04289L5.06312 8.39644L5.41668 8.74999L5.77023 9.10355ZM14.2298 10.8964L13.8762 11.25L14.5833 11.9571L14.9369 11.6035L14.5833 11.25L14.2298 10.8964ZM11.6036 14.9369L11.9571 14.5833L11.25 13.8762L10.8965 14.2298L11.25 14.5833L11.6036 14.9369ZM7.14646 12.1464L6.7929 12.5L7.50001 13.2071L7.85356 12.8535L7.50001 12.5L7.14646 12.1464ZM12.8536 7.85355L13.2071 7.49999L12.5 6.79289L12.1465 7.14644L12.5 7.49999L12.8536 7.85355ZM2.08334 12.0833L1.72979 12.4369L7.56312 18.2702L7.91668 17.9167L8.27023 17.5631L2.4369 11.7298L2.08334 12.0833ZM17.9167 7.91666L18.2702 7.56311L12.4369 1.72977L12.0833 2.08333L11.7298 2.43688L17.5631 8.27022L17.9167 7.91666ZM12.0833 2.08333L11.7298 1.72977L8.39646 5.06311L8.75001 5.41666L9.10356 5.77021L12.4369 2.43688L12.0833 2.08333ZM5.41668 8.74999L5.06312 8.39644L1.72979 11.7298L2.08334 12.0833L2.4369 12.4369L5.77023 9.10355L5.41668 8.74999ZM14.5833 11.25L14.9369 11.6035L18.2702 8.27022L17.9167 7.91666L17.5631 7.56311L14.2298 10.8964L14.5833 11.25ZM7.91668 17.9167L8.27023 18.2702L11.6036 14.9369L11.25 14.5833L10.8965 14.2298L7.56312 17.5631L7.91668 17.9167ZM7.50001 12.5L7.85356 12.8535L12.8536 7.85355L12.5 7.49999L12.1465 7.14644L7.14646 12.1464L7.50001 12.5Z" fill="currentColor"/>',
   };
-  // Each call shows OpenCode's icon for its tool; a run of calls folds into one line of icons and a count.
   const TOOL_ICON = { run: "console", read: "glasses", edit: "code-lines", search: "magnifying-glass-menu", web: "window-cursor", agent: "task", plan: "checklist", tool: "mcp" };
   const CHEV = '<span class="chev"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M5 6.5L8 9.5L11 6.5" stroke="currentColor"/></svg></span>';
   const svg = (name, size) => '<svg width="' + (size || 16) + '" height="' + (size || 16) + '" viewBox="0 0 20 20" fill="none" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
@@ -504,10 +504,11 @@ function client() {
   let rows = new Map();
   let recent = []; // the agent's last raw output lines, shown if the run fails
 
-  // A reconnect replays the log, so the transcript starts over.
+  // Only a truncated log starts over. Reconnects append from the last event ID.
   function reset() {
     feed.replaceChildren();
     phase = ""; group = null; rows = new Map(); recent = [];
+    pinned = true;
   }
 
   function add(node) {
@@ -593,6 +594,7 @@ function client() {
         await navigator.clipboard.writeText(text);
         copy.innerHTML = svg("check");
         copy.setAttribute("aria-label", "Copied response");
+        activity.textContent = "Response copied.";
         setTimeout(() => { copy.innerHTML = svg("copy"); copy.setAttribute("aria-label", "Copy response"); }, 1600);
       } catch {
         hint.textContent = "Couldn't copy. Select the response text to copy it.";
@@ -605,11 +607,10 @@ function client() {
 
   function summarize(g) {
     const calls = [...g.querySelectorAll(".tool")];
-    const kinds = [...new Set(calls.map((call) => call.dataset.icon || "tool"))];
-    g.querySelector(".gtrig b").innerHTML = kinds.map((kind) => svg(TOOL_ICON[kind] || "mcp")).join("");
-    g.querySelector(".gtrig .n").textContent = "Used " + calls.length + (calls.length === 1 ? " tool" : " tools");
-    g.querySelector(".gtrig").setAttribute("aria-label", calls.length + " tool calls");
-    g.querySelector(".gl").classList.toggle("shimmer", calls.some((call) => call.dataset.state === "running"));
+    const title = calls.length + (calls.length === 1 ? " tool call" : " tool calls");
+    g.querySelector(".gtrig .n").textContent = title;
+    const working = calls.some((call) => call.dataset.state === "running");
+    g.querySelector(".gtrig").setAttribute("aria-label", title + (working ? ", working" : ""));
   }
 
   function tool(item) {
@@ -617,7 +618,7 @@ function client() {
     if (!row) {
       if (!group) {
         const g = add(el("div", "group"));
-        g.innerHTML = '<button class="gtrig" type="button" aria-expanded="false"><span class="gl"><b></b><span class="n"></span></span>' + CHEV + '</button><div class="rows" hidden></div>';
+        g.innerHTML = '<button class="gtrig" type="button" aria-expanded="false"><span class="n"></span>' + CHEV + '</button><div class="rows" hidden></div>';
         group = g;
       }
       row = el("div", "tool");
@@ -626,7 +627,7 @@ function client() {
       rows.set(item.id, row);
     }
     if (item.icon) { row.dataset.icon = item.icon; row.querySelector(".label").innerHTML = svg(TOOL_ICON[item.icon] || "mcp"); }
-    if (item.title !== undefined) { row.dataset.title = item.title; row.querySelector(".sub").textContent = item.title; }
+    if (item.title !== undefined) { row.dataset.title = item.title; row.querySelector(".sub").textContent = item.title; row.querySelector(".sub").title = item.title; }
     if (item.meta) {
       const arg = row.querySelector(".arg");
       arg.replaceChildren();
@@ -661,8 +662,8 @@ function client() {
       // A diff or a plan says more than the tool's own reply, unless the call failed.
       if (item.output && (!detail.childElementCount || item.state === "error")) detail.append(el("pre", "out", item.output));
     }
-    row.querySelector(".label").classList.toggle("shimmer", row.dataset.state === "running");
     row.classList.toggle("has-detail", detail.childElementCount > 0);
+    row.querySelector(".trig").setAttribute("aria-label", (row.dataset.title || "Tool call") + ", " + (row.dataset.state || "running"));
     detail.hidden = !row.classList.contains("open");
     summarize(row.closest(".group"));
   }
@@ -707,8 +708,13 @@ function client() {
   });
 
   const events = new EventSource("/_handoff/events");
+  events.addEventListener("reset", reset);
   events.addEventListener("log", (e) => {
-    JSON.parse(e.data).forEach(entry);
+    const items = JSON.parse(e.data);
+    items.forEach(entry);
+    if (items.some((item) => item.kind === "text")) {
+      activity.textContent = feed.querySelectorAll(".prose").length + " agent responses. Latest response available.";
+    }
     follow();
   });
   events.addEventListener("status", (e) => {
@@ -721,7 +727,7 @@ function client() {
     const link = document.getElementById("pr");
     if (pr) { link.href = pr; link.hidden = false; }
   });
-  events.onopen = () => { document.body.classList.remove("offline"); hint.textContent = ""; reset(); };
+  events.onopen = () => { document.body.classList.remove("offline"); hint.textContent = ""; };
   events.onerror = () => { document.body.classList.add("offline"); hint.textContent = "Reconnecting…"; };
 
   const text = document.getElementById("text");
@@ -757,6 +763,7 @@ function client() {
       const response = await fetch("/_handoff/message", { method: "POST", body: message });
       if (!response.ok) throw new Error((await response.json()).error);
       text.value = ""; grow(); hint.textContent = "";
+      activity.textContent = "Message queued for the agent.";
       if (panel.classList.contains("composing")) setExpanded(false);
     } catch (error) {
       bubble.remove();

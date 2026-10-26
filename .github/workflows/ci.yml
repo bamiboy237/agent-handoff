@@ -33,6 +33,9 @@ jobs:
     name: Watch viewer browser checks
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      matrix:
+        browser: [chromium, webkit]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -42,8 +45,10 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
       - run: npm run test:watch
+        env:
+          WATCH_BROWSER: ${{ matrix.browser }}
 
   scripts:
     name: Shell and Python syntax
