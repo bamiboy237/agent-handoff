@@ -188,10 +188,15 @@ const server = createServer(async (req, res) => {
     return res.end("This link needs its key. Open the full link from your agent.");
   }
   // The first visit trades the key in the URL for a cookie, then drops it from the address.
+  // The Secure flag is only set when the browser-facing scheme is HTTPS: WebKit
+  // will not store or send a Secure cookie from a plain HTTP origin, while
+  // Chromium allows it on localhost, so an unconditional flag breaks WebKit.
   if (url.searchParams.has("key")) {
     url.searchParams.delete("key");
+    const forwardedProto = (req.headers["x-forwarded-proto"] ?? "").split(",")[0].trim().toLowerCase();
+    const secureCookie = req.socket.encrypted || forwardedProto === "https" ? "; Secure" : "";
     res.writeHead(303, {
-      "set-cookie": `${COOKIE}=${encodeURIComponent(KEY)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
+      "set-cookie": `${COOKIE}=${encodeURIComponent(KEY)}; Path=/; HttpOnly${secureCookie}; SameSite=Lax; Max-Age=2592000`,
       location: `${url.pathname}${url.search}`,
     });
     return res.end();

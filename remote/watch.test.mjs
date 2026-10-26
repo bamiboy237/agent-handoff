@@ -51,6 +51,15 @@ test(`watch viewer: mobile, desktop and live interactions (${browserName})`, { t
     await delay(50);
   }
   assert.equal((await fetch(origin)).status, 403);
+  // WebKit will not store or send a Secure cookie from a plain HTTP origin,
+  // while Chromium allows it on localhost. The login must stay usable over HTTP.
+  const login = await fetch(`${origin}/?key=${key}`, { redirect: "manual" });
+  assert.equal(login.status, 303);
+  const loginCookie = login.headers.get("set-cookie") ?? "";
+  assert.match(loginCookie, /handoff_key=/, "login sets the watch cookie");
+  assert.doesNotMatch(loginCookie, /;\s*Secure/i, "plain HTTP login omits Secure so every browser sends the cookie back");
+  const tlsLogin = await fetch(`${origin}/?key=${key}`, { redirect: "manual", headers: { "x-forwarded-proto": "https" } });
+  assert.match(tlsLogin.headers.get("set-cookie") ?? "", /;\s*Secure/i, "proxied HTTPS login keeps the Secure cookie");
   const snapshot = async (cursor) => {
     const response = await fetch(`${origin}/_handoff/events`, { headers: { cookie: `handoff_key=${key}`, ...(cursor === undefined ? {} : { "last-event-id": cursor }) } });
     const reader = response.body.getReader();
