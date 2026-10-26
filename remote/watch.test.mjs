@@ -1,6 +1,6 @@
 // Exercises the real watch server, SSE parser and browser UI without a sandbox.
 // Run `npx playwright install chromium` once, then `npm run test:watch`.
-// Set WATCH_SCREENSHOT_DIR to also capture the three review screenshots.
+// Set WATCH_SCREENSHOT_DIR to also capture the review screenshots.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -28,7 +28,7 @@ test(`watch viewer: mobile, desktop and live interactions (${browserName})`, { t
   const key = "watch-ui-test";
   await Promise.all([
     writeFile(join(home, "runner.log"), fixture.join("\n") + "\n"),
-    writeFile(join(home, "state"), "running"),
+    writeFile(join(home, "state"), "warming"),
     writeFile(join(home, "title.txt"), "Keep the mobile viewer in sync"),
   ]);
   const startServer = () => spawn(process.execPath, ["remote/watch.mjs"], {
@@ -86,7 +86,11 @@ test(`watch viewer: mobile, desktop and live interactions (${browserName})`, { t
   await page.evaluate(() => document.fonts.ready);
   assert.equal(new URL(page.url()).search, "", "key is removed from address");
   assert.equal(await page.locator("#title").textContent(), "Keep the mobile viewer in sync");
-  assert.equal(await page.locator("#state").textContent(), "Working");
+  await page.waitForFunction(() => document.querySelector("#state").textContent === "Getting ready");
+  assert.equal(await page.locator("#header .agent-name").textContent(), "Claude Code");
+  assert.equal(await page.locator("#send .agent-label, #send .run-state").count(), 0, "composer has no identity/status row");
+  assert.equal(await page.locator("#state").getAttribute("class"), "sr", "run state stays available to screen readers without visible text");
+  assert.equal(await page.locator("#go").getAttribute("data-mode"), "send", "idle control shows the paper plane");
   assert.equal(await page.locator(".gtrig").textContent(), "3 tool calls");
   assert.equal(await page.locator(".private, [data-icon='lock'], .agent-label svg").count(), 0, "no decorative lock or agent glyph");
   assert.ok(await page.locator("#go").isDisabled());
@@ -100,9 +104,19 @@ test(`watch viewer: mobile, desktop and live interactions (${browserName})`, { t
   assert.equal(await page.locator("#feed").getAttribute("aria-live"), null, "transcript is readable without announcing every tool update");
   assert.equal(await page.locator("#scroll").getAttribute("role"), "region");
   assert.match(await page.locator("#activity").textContent(), /2 agent responses/);
+  await writeFile(join(home, "state"), "running");
+  await page.waitForFunction(() => document.querySelector("#go").dataset.mode === "working");
+  assert.equal(await page.locator("#go").getAttribute("aria-label"), "Agent working");
+  assert.ok(await page.locator("#go").isDisabled(), "working icon is an indicator, not an unsupported stop button");
+  assert.equal(await page.locator("#go svg").count(), 1, "working replaces send; it is not a second icon");
+  assert.equal(await page.locator("#go circle").count(), 1);
   await page.emulateMedia({ reducedMotion: "no-preference" });
-  assert.equal(await page.locator("#indicator").evaluate((node) => getComputedStyle(node, "::before").animationName), "none", "working state stays still");
+  assert.deepEqual(await page.locator("#go svg").evaluate((node) => {
+    const style = getComputedStyle(node);
+    return { name: style.animationName, duration: style.animationDuration, easing: style.animationTimingFunction };
+  }), { name: "working", duration: "1s", easing: "linear" });
   await page.emulateMedia({ reducedMotion: "reduce" });
+  assert.equal(await page.locator("#go svg").evaluate((node) => getComputedStyle(node).animationName), "none", "reduced motion keeps a static working icon");
   assert.equal(await page.locator(".gtrig").evaluate((node) => getComputedStyle(node).touchAction), "manipulation");
   assert.equal(await page.locator("html").evaluate((node) => getComputedStyle(node).overscrollBehaviorY), "none");
   assert.equal(await page.locator(".prose").first().evaluate((node) => getComputedStyle(node).userSelect), "auto", "response text stays selectable");
@@ -154,8 +168,16 @@ test(`watch viewer: mobile, desktop and live interactions (${browserName})`, { t
   await page.locator(".copy").last().click();
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), "The latest changes are ready for review.");
   await page.locator("#text").fill("Please also check the narrow layout.");
+  assert.equal(await page.locator("#go").getAttribute("data-mode"), "send", "typing replaces the working icon with the paper plane");
+  assert.equal(await page.locator("#go").getAttribute("aria-label"), "Send message");
+  assert.equal(await page.locator("#go circle").count(), 0);
+  assert.ok(await page.locator("#go").isEnabled(), "a new message can be sent while the agent works");
+  await page.locator("#text").fill("   ");
+  assert.equal(await page.locator("#go").getAttribute("data-mode"), "working", "clearing a draft restores the working icon");
+  await page.locator("#text").fill("Please also check the narrow layout.");
   assert.match(await page.locator("#send").evaluate((node) => getComputedStyle(node).boxShadow), /rgb\(162, 188, 255\)/, "composer has a contrasting focus bar");
   assert.equal(await page.locator("#go").evaluate((node) => getComputedStyle(node).color), "rgb(204, 204, 204)", "enabled send reads as active");
+  await screenshot("watch-zed-draft");
   await page.locator("#expand").click();
   assert.equal(await page.locator("#expand").getAttribute("aria-expanded"), "true");
   assert.ok(!(await page.locator("#scroll").isVisible()));
@@ -163,9 +185,17 @@ test(`watch viewer: mobile, desktop and live interactions (${browserName})`, { t
   assert.equal(await page.locator("#text").inputValue(), "Please also check the narrow layout.");
 
   // Error feedback preserves the draft, then the actual POST reaches the inbox.
-  await page.route("**/_handoff/message", (route) => route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"Try again."}' }));
+  let sendingMode;
+  await page.route("**/_handoff/message", async (route) => {
+    sendingMode = await page.locator("#go").getAttribute("data-mode");
+    await page.locator("#text").dispatchEvent("input");
+    assert.ok(await page.locator("#go").isDisabled(), "editing during submission cannot enable a duplicate send");
+    await route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"Try again."}' });
+  });
   await page.locator("#go").click();
   await page.waitForFunction(() => document.querySelector("#hint").textContent.includes("Not sent"));
+  assert.equal(sendingMode, "sending", "message submission shows progress until the request finishes");
+  assert.equal(await page.locator("#go").getAttribute("data-mode"), "send", "failed send restores the paper plane and draft");
   assert.equal(await page.locator("#text").inputValue(), "Please also check the narrow layout.");
   assert.equal(await page.locator(".you.pending").count(), 0);
   await page.unroute("**/_handoff/message");
@@ -176,6 +206,7 @@ test(`watch viewer: mobile, desktop and live interactions (${browserName})`, { t
   assert.equal(await readFile(join(home, "inbox", inbox[0]), "utf8"), "Please also check the narrow layout.");
   assert.equal(await page.locator("#expand").getAttribute("aria-expanded"), "false");
   assert.equal(await page.locator("#activity").textContent(), "Message queued for the agent.");
+  assert.equal(await page.locator("#go").getAttribute("data-mode"), "working", "sending clears the draft and returns to the agent's working icon");
   await appendFile(join(home, "runner.log"), user("Please also check the narrow layout.") + "\n");
   await page.waitForFunction(() => !document.querySelector(".you.pending"));
 
@@ -185,10 +216,11 @@ test(`watch viewer: mobile, desktop and live interactions (${browserName})`, { t
   await page.waitForFunction(() => document.body.dataset.state === "completed");
   assert.equal(await page.locator("#state").textContent(), "Done");
   assert.equal(await page.locator("#pr").getAttribute("href"), "https://github.com/example/project/pull/42");
-  assert.ok(await page.locator("#indicator .ok").isVisible());
+  assert.equal(await page.locator("#go").getAttribute("data-mode"), "send", "completion returns to the normal paper plane");
   await writeFile(join(home, "state"), "failed:agent");
   await page.waitForFunction(() => document.body.dataset.state === "failed");
-  assert.ok(await page.locator("#indicator .bad").isVisible());
+  assert.equal(await page.locator("#hint").textContent(), "The agent stopped with an error. Check its latest output.");
+  assert.equal(await page.locator("#go").getAttribute("data-mode"), "send");
   await writeFile(join(home, "state"), "completed");
   await page.waitForFunction(() => document.body.dataset.state === "completed");
 

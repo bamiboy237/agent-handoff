@@ -274,19 +274,11 @@ button, .icon-button { touch-action: manipulation; user-select: none; -webkit-us
 
 /* A single hairline, not a floating session card. Controls have 44px tap areas. */
 header { flex: none; padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); border-bottom: 1px solid var(--border); }
-.bar { display: flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 6px 0 16px; }
-.bar h1 { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 14px/20px var(--sans); }
+.bar { display: flex; align-items: center; gap: 4px; min-height: 60px; padding: 8px 6px 8px 16px; }
+.heading { flex: 1; min-width: 0; }
+.agent-name { display: block; color: var(--muted); font: 400 12px/18px var(--sans); }
+.bar h1 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 14px/20px var(--sans); }
 .note { margin: 0 16px 12px; color: var(--muted); }
-.ind { display: inline-flex; width: 14px; height: 16px; align-items: center; justify-content: center; color: var(--muted); }
-.ind::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.ind > svg { display: none; }
-[data-state="running"] .ind { color: var(--success); }
-[data-state="completed"] .ind::before, [data-state="failed"] .ind::before { display: none; }
-[data-state="completed"] .ind .ok { display: block; color: var(--success); }
-[data-state="failed"] .ind .bad { display: block; color: var(--danger); }
-.offline .ind { color: var(--danger); }
-.offline .ind::before { display: block; }
-.offline .ind > svg { display: none; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .icon-button { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--icon); cursor: pointer; text-decoration: none; }
 .pr[hidden] { display: none; }
@@ -390,6 +382,7 @@ footer { position: relative; flex: none; display: flex; flex-direction: column; 
 .hint:empty { display: none; }
 .hint { width: 100%; max-width: var(--session); margin: 0; padding: 8px var(--pad) 0; font: 400 12px/18px var(--sans); color: var(--muted); }
 .offline .hint { color: var(--danger); }
+[data-state="failed"] .hint { color: var(--danger); }
 form { position: relative; width: 100%; max-width: var(--session); margin: 0; }
 textarea { display: block; width: 100%; min-height: 88px; max-height: min(180px, 40dvh); margin: 0; padding: 16px 52px 8px var(--pad); resize: none; border: 0; border-radius: 0; background: transparent; color: var(--text); font: 400 16px/1.6 var(--mono); }
 textarea::placeholder { color: var(--faint); }
@@ -397,14 +390,15 @@ textarea:focus-visible { outline: none; }
 form:focus-within { box-shadow: inset 0 2px 0 var(--focus); }
 .expand { position: absolute; top: 2px; right: 4px; }
 .actions { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 6px 4px var(--pad); color: var(--muted); font: 400 12px/18px var(--sans); }
-.agent-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.run-state { display: inline-flex; align-items: center; gap: 4px; padding-left: 8px; border-left: 1px solid var(--border-strong); white-space: nowrap; }
 .send { position: relative; margin-left: auto; background: transparent; }
 .send::before { content: ""; position: absolute; width: 26px; height: 26px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--pressed); }
 .send svg { position: relative; }
 .send:not(:disabled) { color: var(--text); }
 .send:disabled { color: #666; cursor: not-allowed; }
 .send:disabled::before { background: var(--raised); border-color: var(--border); }
+.send[data-mode="working"], .send[data-mode="sending"] { color: var(--muted); }
+.send[data-mode="working"] svg, .send[data-mode="sending"] svg { animation: working 1s linear infinite; }
+@keyframes working { to { transform: rotate(360deg); } }
 .panel.composing form { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 .panel.composing footer { flex: 1; min-height: 0; }
 .panel.composing .scroll, .panel.composing .latest { display: none; }
@@ -414,17 +408,19 @@ form:focus-within { box-shadow: inset 0 2px 0 var(--focus); }
 
 @media (prefers-reduced-motion: reduce) {
   .latest { transition: none; transform: translate(-50%, 0); }
+  .send[data-mode] svg { animation: none; }
 }
 </style>
 </head>
 <body data-state="warming">
 <header id="header">
-  <div class="bar"><h1 id="title">${name} is getting ready</h1><a class="icon-button pr" id="pr" target="_blank" rel="noopener" aria-label="Open pull request" title="Open pull request" hidden><svg data-icon="git-pull-request"></svg></a></div>
+  <div class="bar"><div class="heading"><span class="agent-name">${name}</span><h1 id="title">${name} is getting ready</h1></div><a class="icon-button pr" id="pr" target="_blank" rel="noopener" aria-label="Open pull request" title="Open pull request" hidden><svg data-icon="git-pull-request"></svg></a></div>
   ${opencodeNote}
 </header>
 <div class="panel">
 <div class="scroll" id="scroll" role="region" aria-label="Agent transcript" tabindex="0"><main><div class="feed" id="feed"></div></main></div>
 <p class="sr" id="activity" role="status" aria-atomic="true"></p>
+<p class="sr" id="state" role="status">Connecting</p>
 <button class="icon-button latest" id="latest" type="button" aria-label="Jump to latest" title="Jump to latest"><svg data-icon="arrow-down"></svg></button>
 <footer id="footer">
   <p class="hint" id="hint" role="status"></p>
@@ -432,8 +428,6 @@ form:focus-within { box-shadow: inset 0 2px 0 var(--focus); }
     <textarea id="text" rows="1" placeholder="Message ${name}…" aria-label="Message ${name}" enterkeyhint="send"></textarea>
     <button class="icon-button expand" id="expand" type="button" aria-label="Expand composer" aria-expanded="false" title="Expand composer"><svg data-icon="expand"></svg></button>
     <div class="actions">
-      <span class="agent-label">${name}</span>
-      <span class="run-state"><span class="ind" id="indicator" aria-hidden="true"><svg class="ok" data-icon="circle-check"></svg><svg class="bad" data-icon="warning"></svg></span><span id="state" role="status">Connecting</span></span>
       <button class="icon-button send" id="go" type="submit" aria-label="Send message" title="Send message"><svg data-icon="send"></svg></button>
     </div>
   </form>
@@ -457,6 +451,7 @@ function client() {
   const ICONS = {
     "git-pull-request": '<g stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="4" r="2"/><circle cx="5" cy="16" r="2"/><circle cx="15" cy="16" r="2"/><path d="M5 6v8m10 0V7a3 3 0 0 0-3-3H9m3-3L9 4l3 3"/></g>',
     send: '<path d="m4 4 12 6-12 6 2-6zm2 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+    working: '<circle cx="10" cy="10" r="6.5" stroke="currentColor" stroke-width="1.5" opacity=".25"/><path d="M10 3.5a6.5 6.5 0 0 1 6.5 6.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
     expand: '<path d="M12 3h5v5m0-5-6 6M8 17H3v-5m0 5 6-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
     collapse: '<path d="m17 3-6 6m0-5v5h5M3 17l6-6m-5 0h5v5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
     copy: '<rect x="7" y="7" width="10" height="10" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M12 4V3H3v9h1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
@@ -470,8 +465,6 @@ function client() {
     checklist: '<path d="M9.58342 13.7498H17.0834M9.58342 6.24984H17.0834M2.91675 6.6665L4.58341 7.9165L7.08341 4.1665M2.91675 14.1665L4.58341 15.4165L7.08341 11.6665" stroke="currentColor" stroke-linecap="square"/>',
     mcp: '<g><path d="M0.972656 9.37176L9.5214 1.60019C10.7018 0.527151 12.6155 0.527151 13.7957 1.60019C14.9761 2.67321 14.9761 4.41295 13.7957 5.48599L7.3397 11.3552" stroke="currentColor" stroke-linecap="round"/><path d="M7.42871 11.2747L13.7957 5.48643C14.9761 4.41338 16.8898 4.41338 18.0702 5.48643L18.1147 5.52688C19.2951 6.59993 19.2951 8.33966 18.1147 9.4127L10.3831 16.4414C9.98966 16.7991 9.98966 17.379 10.3831 17.7366L11.9707 19.1799" stroke="currentColor" stroke-linecap="round"/><path d="M11.6587 3.54346L5.33619 9.29119C4.15584 10.3642 4.15584 12.1039 5.33619 13.177C6.51649 14.25 8.43019 14.25 9.61054 13.177L15.9331 7.42923" stroke="currentColor" stroke-linecap="round"/></g>',
     check: '<path d="M6.5 11.4412L8.97059 13.5L13.5 6.5" stroke="currentColor" stroke-linecap="square"/>',
-    "circle-check": '<path d="M12.4987 7.91732L8.7487 12.5007L7.08203 10.834M17.9154 10.0007C17.9154 14.3729 14.371 17.9173 9.9987 17.9173C5.62644 17.9173 2.08203 14.3729 2.08203 10.0007C2.08203 5.6284 5.62644 2.08398 9.9987 2.08398C14.371 2.08398 17.9154 5.6284 17.9154 10.0007Z" stroke="currentColor" stroke-linecap="square"/>',
-    warning: '<path d="M10 7.91667V11.6667M10 13.7417V13.75M10 2.5L1.875 16.25H18.125L10 2.5Z" stroke="currentColor" stroke-linecap="square"/>',
   };
   const TOOL_ICON = { run: "console", read: "glasses", edit: "code-lines", search: "magnifying-glass-menu", web: "window-cursor", agent: "task", plan: "checklist", tool: "mcp" };
   const CHEV = '<span class="chev"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M5 6.5L8 9.5L11 6.5" stroke="currentColor"/></svg></span>';
@@ -708,6 +701,7 @@ function client() {
   });
 
   const events = new EventSource("/_handoff/events");
+  const failedHint = "The agent stopped with an error. Check its latest output.";
   events.addEventListener("reset", reset);
   events.addEventListener("log", (e) => {
     const items = JSON.parse(e.data);
@@ -722,16 +716,19 @@ function client() {
     const kind = state.startsWith("failed") ? "failed" : state;
     document.body.dataset.state = kind;
     document.getElementById("state").textContent = states[kind] || kind;
-    document.getElementById("indicator").title = states[kind] || kind;
+    if (kind === "failed") hint.textContent = failedHint;
+    else if (hint.textContent === failedHint) hint.textContent = "";
     if (title) { document.getElementById("title").textContent = title; document.title = title; }
     const link = document.getElementById("pr");
     if (pr) { link.href = pr; link.hidden = false; }
+    ready();
   });
-  events.onopen = () => { document.body.classList.remove("offline"); hint.textContent = ""; };
-  events.onerror = () => { document.body.classList.add("offline"); hint.textContent = "Reconnecting…"; };
+  events.onopen = () => { document.body.classList.remove("offline"); hint.textContent = document.body.dataset.state === "failed" ? failedHint : ""; ready(); };
+  events.onerror = () => { document.body.classList.add("offline"); hint.textContent = "Reconnecting…"; ready(); };
 
   const text = document.getElementById("text");
   const go = document.getElementById("go");
+  let sending = false;
   const expand = document.getElementById("expand");
   const panel = document.querySelector(".panel");
   const setExpanded = (open) => {
@@ -746,7 +743,19 @@ function client() {
   expand.addEventListener("click", () => setExpanded(!panel.classList.contains("composing")));
   text.addEventListener("keydown", (e) => { if (e.key === "Escape" && panel.classList.contains("composing")) setExpanded(false); });
   const grow = () => { text.style.height = "auto"; text.style.height = Math.min(Math.max(text.scrollHeight, 88), 180) + "px"; };
-  const ready = () => { go.disabled = !text.value.trim(); };
+  const ready = () => {
+    const draft = Boolean(text.value.trim());
+    const working = document.body.dataset.state === "running" && !document.body.classList.contains("offline");
+    const mode = sending ? "sending" : !draft && working ? "working" : "send";
+    go.disabled = sending || !draft;
+    if (go.dataset.mode !== mode) {
+      go.dataset.mode = mode;
+      go.innerHTML = svg(mode === "send" ? "send" : "working");
+      go.setAttribute("aria-label", mode === "sending" ? "Sending message" : mode === "working" ? "Agent working" : "Send message");
+      go.title = go.getAttribute("aria-label");
+    }
+    go.setAttribute("aria-busy", mode !== "send");
+  };
   text.addEventListener("input", grow);
   text.addEventListener("input", ready);
   ready();
@@ -754,22 +763,23 @@ function client() {
   document.getElementById("send").addEventListener("submit", async (e) => {
     e.preventDefault();
     const message = text.value.trim();
-    if (!message) return;
-    go.disabled = true;
+    if (!message || sending) return;
+    sending = true; ready();
     // Shows the message at once; the log confirms it when the agent picks it up.
     const bubble = add(el("p", "you pending", message));
     pinned = true; follow();
     try {
       const response = await fetch("/_handoff/message", { method: "POST", body: message });
       if (!response.ok) throw new Error((await response.json()).error);
-      text.value = ""; grow(); hint.textContent = "";
+      if (text.value.trim() === message) text.value = "";
+      grow(); hint.textContent = "";
       activity.textContent = "Message queued for the agent.";
       if (panel.classList.contains("composing")) setExpanded(false);
     } catch (error) {
       bubble.remove();
       hint.textContent = "Not sent: " + error.message;
     }
-    ready();
+    sending = false; ready();
   });
 }
 
