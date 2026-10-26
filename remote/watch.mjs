@@ -230,145 +230,136 @@ function page() {
     AGENT === "opencode"
       ? `<p class="note">OpenCode's full app opens here once the agent starts. Reload in a moment.</p>`
       : "";
-  // OpenCode's working indicator: a 5 by 5 grid of 2px squares that pulse in a diagonal wave.
-  const dots = Array.from({ length: 25 }, (_, i) => {
-    const x = i % 5;
-    const y = Math.floor(i / 5);
-    return `<rect x="${1 + x * 3}" y="${1 + y * 3}" width="2" height="2" style="--d:${(x + y) * 90}ms"/>`;
-  }).join("");
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#080808">
+<meta name="theme-color" content="#000000">
 <title>${name} handoff</title>
 <style>
-/* Styled after the web UI of OpenCode (https://github.com/anomalyco/opencode, MIT License).
-   Dark tokens follow packages/ui/src/theme/v2, markup and metrics follow packages/session-ui
-   and packages/app. Inter and IBM Plex Mono are inlined as subsets. */
+/* Zed-inspired agent panel: black transcript, neutral message blocks, hairline
+   chrome and a flush composer. Fonts stay inlined so sandbox pages work offline. */
 @font-face { font-family: "Inter"; src: url(data:font/woff2;base64,${INTER_WOFF2}) format("woff2"); font-weight: 400 670; font-display: swap; }
 @font-face { font-family: "IBM Plex Mono"; src: url(data:font/woff2;base64,${PLEX_WOFF2}) format("woff2"); font-weight: 400 500; font-display: swap; }
 :root {
-  --deep: #080808; --base: #161616; --raised: #242424; --layer-01: #3a3a3a;
-  --text: #fafafa; --muted: #aeaeae; --faint: #808080; --icon: #dbdbdb;
-  --border: rgba(255, 255, 255, 0.1);
-  --hover: rgba(255, 255, 255, 0.06); --pressed: rgba(255, 255, 255, 0.1);
-  --user-bg: #021945; --user-text: #c3d4fd;
-  --accent: #a2bcff; --success: #6bd586; --danger: #f17471; --focus: #7698fd;
+  --deep: #000000; --base: #191919; --raised: #242424;
+  --text: #cccccc; --muted: #a0a0a0; --faint: #858585; --icon: #a0a0a0;
+  --border: #292929; --border-strong: #373737;
+  --hover: #242424; --pressed: #303030;
+  --accent: #a2bcff; --success: #78c78b; --danger: #ef9292; --focus: #a2bcff;
   --sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  --session: 744px;
+  --session: 820px;
   --pad: 16px;
-  --inset: 1px;
-  --raise: 0 2px 4px 0 rgba(0, 0, 0, 0.3), 0 1px 2px 0 rgba(0, 0, 0, 0.3), 0 0 0 0.5px rgba(255, 255, 255, 0.16), 0 -0.5px 0 0 rgba(255, 255, 255, 0.06);
 }
-@media (min-width: 768px) { :root { --pad: 24px; --inset: 8px; } }
+@media (min-width: 768px) { :root { --pad: 24px; } }
 * { box-sizing: border-box; }
 html { height: 100%; background: var(--deep); color-scheme: dark; }
-body { height: 100%; margin: 0; padding: 1px; display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none; background: var(--deep); color: #fff; font: 440 13px/24px var(--sans); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; -webkit-tap-highlight-color: transparent; }
-::selection { background: rgba(118, 152, 253, 0.35); }
+body { height: 100vh; height: 100dvh; margin: 0; display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none; background: var(--deep); color: var(--text); font: 400 14px/22px var(--sans); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; -webkit-tap-highlight-color: transparent; }
+::selection { background: rgba(162, 188, 255, 0.3); }
 svg { flex: none; }
 button { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
-/* Title bar on the deep background, 36px (app header). */
-header { flex: none; padding: calc(8px + env(safe-area-inset-top)) 8px 0; }
-.bar { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; }
-.bar h1 { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 440 13px/16px var(--sans); color: var(--text); }
-@media (min-width: 768px) { .bar h1 { font-weight: 500; } }
-.note { margin: 4px 16px 0; font: 440 13px/16px var(--sans); letter-spacing: -0.04px; color: var(--muted); }
-.ind { position: relative; width: 16px; height: 16px; color: var(--faint); }
-.ind > svg { position: absolute; inset: 0; display: none; }
-.ind .dots { display: block; fill: currentColor; }
-.dots rect { opacity: 0.35; }
-[data-state="running"] .dots rect { animation: pixel 1.35s ease-in-out infinite; animation-delay: var(--d); }
-[data-state="completed"] .dots, [data-state="failed"] .dots { display: none; }
-[data-state="completed"] .ok { display: block; color: var(--success); }
-[data-state="failed"] .bad { display: block; color: var(--danger); }
-@keyframes pixel { 0%, 100% { opacity: 0.2; } 45% { opacity: 1; } }
+/* A single hairline, not a floating session card. Controls have 44px tap areas. */
+header { flex: none; padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); border-bottom: 1px solid var(--border); }
+.bar { display: flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 6px 0 16px; }
+.bar h1 { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 14px/20px var(--sans); }
+.private { display: grid; place-items: center; width: 32px; height: 44px; color: var(--muted); }
+.note { margin: 0 16px 12px; color: var(--muted); }
+.ind { display: inline-flex; width: 14px; height: 16px; align-items: center; justify-content: center; color: var(--muted); }
+.ind::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.ind > svg { display: none; }
+[data-state="running"] .ind { color: var(--success); }
+[data-state="running"] .ind::before { animation: breathe 1.6s ease-in-out infinite; }
+[data-state="completed"] .ind::before, [data-state="failed"] .ind::before { display: none; }
+[data-state="completed"] .ind .ok { display: block; color: var(--success); }
+[data-state="failed"] .ind .bad { display: block; color: var(--danger); }
+.offline .ind { color: var(--danger); }
+.offline .ind::before { display: block; animation: none; }
+.offline .ind > svg { display: none; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.pr { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px; color: var(--faint); }
+.icon-button { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--icon); cursor: pointer; text-decoration: none; }
 .pr[hidden] { display: none; }
-.pr:active { background: var(--pressed); color: var(--icon); }
-@media (hover: hover) { .pr:hover { background: var(--hover); color: var(--icon); } }
+.icon-button:active { background: var(--pressed); color: var(--text); }
+@media (hover: hover) { .icon-button:hover { background: var(--hover); color: var(--text); } }
 
-/* The session panel: raised, rounded, inset from the window edge. */
-.panel { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 8px var(--inset) calc(8px + env(safe-area-inset-bottom)); overflow: hidden; border-radius: 10px; background: var(--base); box-shadow: var(--raise); }
-.scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
-.scroll::-webkit-scrollbar { display: none; }
+/* Only the transcript scrolls. The composer stays above the phone's safe area. */
+.panel { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); }
 
-/* Timeline: a 744px column, px-4 and md:px-6. */
-main { max-width: var(--session); margin: 0 auto; padding: 16px var(--pad) 24px; }
+main { max-width: var(--session); margin: 0 auto; padding: 24px var(--pad) 28px; }
 .feed { display: flex; flex-direction: column; align-items: flex-start; }
 .feed > * { min-width: 0; max-width: 100%; margin-top: 16px; }
 .feed > :first-child { margin-top: 0; }
-.feed > .you, .feed > .you + * { margin-top: 52px; }
+.feed > .you, .feed > .you + * { margin-top: 28px; }
 .feed > .you:first-child { margin-top: 0; }
+.feed:empty::before { content: "Waiting for the agent…"; color: var(--faint); }
 
-/* Agent text (markdown.css). */
-.prose { width: 100%; font: 440 14px/160% var(--sans); overflow-wrap: break-word; color: var(--text); }
+/* Quiet proportional answers; mono for everything the user types or runs. */
+.prose { width: 100%; font: 400 15px/1.6 var(--sans); overflow-wrap: anywhere; color: var(--text); }
 .prose > :first-child { margin-top: 0; }
 .prose > :last-child { margin-bottom: 0; }
-.prose p { margin: 0 0 12px; white-space: pre-wrap; }
+.prose p { margin: 0 0 14px; white-space: pre-wrap; }
 .prose strong { font-weight: 670; }
 .prose a { color: var(--accent); text-decoration: none; }
 .prose a:hover { text-decoration: underline; text-underline-offset: 2px; }
 .prose h1, .prose h2, .prose h3 { color: var(--text); line-height: 150%; }
-.prose h1 { margin: 28px 0 12px; font-size: 17px; font-weight: 600; }
-.prose h2 { margin: 24px 0 10px; font-size: 15px; font-weight: 600; }
-.prose h3 { margin: 20px 0 8px; font-size: 13px; font-weight: 500; }
-.prose ul, .prose ol { margin: 8px 0 12px; padding-inline-start: 32px; }
+.prose h1 { margin: 28px 0 14px; font-size: 20px; font-weight: 400; }
+.prose h2 { margin: 24px 0 12px; font-size: 18px; font-weight: 400; }
+.prose h3 { margin: 20px 0 10px; font-size: 16px; font-weight: 400; }
+.prose ul, .prose ol { margin: 8px 0 14px; padding-inline-start: 22px; }
 .prose ul { list-style: disc; }
 .prose ol { list-style: decimal; padding-inline-start: 2.25rem; }
-.prose li { margin-bottom: 8px; }
+.prose li { margin-bottom: 4px; }
 .prose li::marker { color: var(--muted); }
-.prose :not(pre) > code { padding: 0 4px; border-radius: 4px; background: rgba(250, 250, 250, 0.08); font-family: var(--mono); font-weight: 500; }
-pre.code { margin: 12px 0 24px; padding: 12px; overflow: auto; border: 0.5px solid var(--border); border-radius: 6px; background: var(--deep); color: var(--text); font: 400 13px/150% var(--mono); scrollbar-width: none; }
-pre.code::-webkit-scrollbar { display: none; }
+.prose :not(pre) > code { padding: 1px 4px; border: 1px solid var(--border); border-radius: 3px; background: var(--base); font: 400 0.9em/1.5 var(--mono); }
+pre.code { margin: 14px 0 20px; padding: 12px; overflow: auto; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--base); color: var(--text); font: 400 14px/1.6 var(--mono); }
+.response-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
+.copy { color: var(--faint); }
 
-/* User message (message-part.css). */
-.you { align-self: flex-end; width: fit-content; max-width: min(82%, 64ch); margin: 0; padding: 8px 12px; border-radius: 8px; background: var(--user-bg); color: var(--user-text); font: 440 14px/21px var(--sans); white-space: pre-wrap; word-break: break-word; }
-.you.pending { opacity: 0.6; }
+/* Full-width prompts, like the reference, rather than right-aligned bubbles. */
+.you { width: 100%; margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 5px; background: var(--base); color: var(--text); font: 400 14px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.you.pending { color: var(--muted); border-style: dashed; }
 
-/* Tool calls fold into one "Used N ..." line (tool-collapsible). */
+/* Tool calls keep their existing folding behavior, with visible affordances. */
 .group { width: 100%; }
-.gtrig { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 28px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); font: 440 13px/16px var(--sans); letter-spacing: -0.04px; text-align: start; cursor: pointer; user-select: none; -webkit-user-select: none; }
+.gtrig { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-height: 44px; padding: 0 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--base); color: var(--muted); font: 400 13px/18px var(--sans); text-align: start; cursor: pointer; user-select: none; -webkit-user-select: none; }
 .gl { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .gtrig b { display: inline-flex; align-items: center; gap: 6px; color: var(--icon); }
-.chev { display: grid; place-items: center; width: 16px; height: 16px; color: var(--faint); opacity: 0; transform: rotate(-90deg); transition: opacity 0.15s ease, transform 0.15s ease; }
-.group.open > .gtrig .chev { opacity: 1; transform: none; }
-@media (hover: hover) { .gtrig:hover .chev, .trig:hover .chev { opacity: 1; } }
-.rows { display: flex; flex-direction: column; gap: 16px; padding: 12px 0 4px 12px; }
+.chev { display: grid; place-items: center; width: 16px; height: 16px; color: var(--faint); transform: rotate(-90deg); transition: transform 0.15s ease; }
+.group.open > .gtrig .chev { transform: none; }
+.rows { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding: 0 0 4px 12px; border-left: 1px solid var(--border); }
 .rows[hidden] { display: none; }
 .tool { display: flex; flex-direction: column; min-width: 0; }
-.trig { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 20px; padding: 1px 0 3px; border: 0; background: none; font: 440 13px/16px var(--sans); letter-spacing: -0.04px; text-align: start; cursor: default; user-select: none; -webkit-user-select: none; }
+.trig { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 4px 0; border: 0; background: none; font: 400 13px/18px var(--sans); text-align: start; cursor: default; user-select: none; -webkit-user-select: none; }
 .tool.has-detail .trig { cursor: pointer; }
+.tool:not(.has-detail) .chev { visibility: hidden; }
 .label { flex: none; display: inline-flex; color: var(--icon); }
 .sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); }
 .arg { flex: none; white-space: nowrap; color: var(--faint); }
 .arg .add { color: var(--success); }
 .arg .del { color: var(--danger); }
-.tool.open .chev { opacity: 1; transform: none; }
+.tool.open .chev { transform: none; }
 .tool[data-state="error"] .label, .tool[data-state="error"] .sub { color: var(--danger); }
 .label.shimmer svg, .gl.shimmer svg { animation: breathe 1.6s ease-in-out infinite; }
 @keyframes breathe { 50% { opacity: 0.4; } }
-.shimmer { background: linear-gradient(90deg, var(--faint) 0%, var(--text) 50%, var(--faint) 100%) 0 0 / 200% 100%; -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; animation: shimmer 1.6s linear infinite; }
-@keyframes shimmer { to { background-position: -200% 0; } }
+.shimmer { color: var(--muted); }
 .detail { margin-top: 8px; }
 .detail[hidden] { display: none; }
 
 /* Tool output: shell block, plain output, diff, todos. */
-.shell { border: 0.5px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--raised); font: 440 13px/20px var(--mono); letter-spacing: -0.04px; }
+.shell { border: 1px solid var(--border-strong); border-radius: 6px; overflow: hidden; background: var(--base); font: 400 13px/20px var(--mono); }
 .shell > * { display: block; margin: 0; padding: 12px; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; scrollbar-width: none; }
 .shell > *::-webkit-scrollbar { display: none; }
 .shell .cmd { color: var(--text); }
-.shell .res { border-top: 0.5px solid var(--border); background: var(--base); color: var(--muted); }
+.shell .res { border-top: 1px solid var(--border); background: var(--deep); color: var(--muted); }
 pre.out { margin: 0; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font: 440 13px/150% var(--mono); letter-spacing: -0.04px; scrollbar-width: none; }
 pre.out::-webkit-scrollbar { display: none; }
 .tool[data-state="error"] pre.out { color: var(--danger); }
-.diff { border: 0.5px solid var(--border); border-radius: 6px; overflow: hidden; font: 440 13px/20px var(--mono); letter-spacing: -0.04px; max-height: 320px; overflow-y: auto; scrollbar-width: none; }
+.diff { border: 1px solid var(--border-strong); border-radius: 6px; overflow: hidden; font: 400 13px/20px var(--mono); max-height: 320px; overflow-y: auto; scrollbar-width: none; }
 .diff::-webkit-scrollbar { display: none; }
 .dl { display: flex; gap: 8px; padding: 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
 .dl i { flex: none; width: 1ch; font-style: normal; }
@@ -387,49 +378,61 @@ pre.out::-webkit-scrollbar { display: none; }
 .event.good { color: var(--success); }
 .event.bad { color: var(--danger); }
 .event a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
-.feed > pre.out { width: 100%; margin-top: 8px; padding: 12px; border: 0.5px solid var(--border); border-radius: 6px; }
+.feed > pre.out { width: 100%; margin-top: 8px; padding: 12px; border: 1px solid var(--border); border-radius: 6px; }
 
-/* Composer dock (composer/editor): 10px radius, 13/20 text, send 8px from the corner. */
-footer { position: relative; flex: none; display: flex; flex-direction: column; align-items: center; padding: 0 12px 12px; background: var(--base); }
-footer::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 16px; pointer-events: none; background: linear-gradient(to top, var(--base), transparent); }
+/* Flush, bordered composer with the same top-right expand and bottom-right send
+   arrangement as the reference. No decorative or unsupported model controls. */
+footer { position: relative; flex: none; display: flex; flex-direction: column; align-items: center; padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); border-top: 1px solid var(--border); background: var(--base); }
 .hint:empty { display: none; }
-.hint { width: 100%; max-width: calc(var(--session) - 24px); margin: 0 0 8px; padding: 0 4px; font: 440 13px/16px var(--sans); letter-spacing: -0.04px; color: var(--faint); }
+.hint { width: 100%; max-width: var(--session); margin: 0; padding: 8px var(--pad) 0; font: 400 12px/18px var(--sans); color: var(--muted); }
 .offline .hint { color: var(--danger); }
-form { position: relative; width: 100%; max-width: calc(var(--session) - 24px); min-height: 96px; margin: 0; overflow: clip; border-radius: 10px; background: var(--raised); box-shadow: var(--raise); }
-textarea { display: block; width: 100%; min-height: 60px; max-height: 180px; margin: 0; padding: 16px 16px 8px; resize: none; border: 0; background: transparent; color: var(--text); font: 440 13px/20px var(--sans); }
+form { position: relative; width: 100%; max-width: var(--session); margin: 0; }
+textarea { display: block; width: 100%; min-height: 88px; max-height: min(180px, 40dvh); margin: 0; padding: 16px 52px 8px var(--pad); resize: none; border: 0; border-radius: 0; background: transparent; color: var(--text); font: 400 16px/1.6 var(--mono); }
 textarea::placeholder { color: var(--faint); }
 textarea:focus-visible { outline: none; }
-.actions { display: flex; align-items: center; justify-content: flex-end; height: 44px; padding: 0 8px; }
-.send { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 6px; border: 0; border-radius: 6px; color: var(--base); cursor: pointer; user-select: none;
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0) 100%), linear-gradient(90deg, var(--icon) 0%, var(--icon) 100%);
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(255, 255, 255, 0.4), 0 -0.5px 0 0 rgba(255, 255, 255, 0.3); }
-.send svg { width: 16px; height: 16px; }
-@media (hover: hover) { .send:hover:not(:disabled) { background-image: linear-gradient(90deg, rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.08)), linear-gradient(180deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0) 100%), linear-gradient(90deg, var(--icon) 0%, var(--icon) 100%); } }
-.send:active:not(:disabled) { background-image: linear-gradient(90deg, rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.4)), linear-gradient(180deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0) 100%), linear-gradient(90deg, var(--icon) 0%, var(--icon) 100%); }
-.send:disabled { opacity: 0.4; cursor: not-allowed; }
-.latest { position: absolute; left: 50%; bottom: calc(var(--dock) + 12px); z-index: 25; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 14px; background: var(--raised); color: var(--icon); box-shadow: 0 8px 16px 0 rgba(0, 0, 0, 0.3), 0 4px 8px 0 rgba(0, 0, 0, 0.3), 0 0 0 0.5px rgba(255, 255, 255, 0.16), 0 -0.5px 0 0 rgba(255, 255, 255, 0.06); opacity: 0; transform: translate(-50%, 6px); pointer-events: none; transition: opacity 0.15s ease, transform 0.15s ease; cursor: pointer; }
-.latest.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+form:focus-within { box-shadow: inset 0 2px 0 var(--border-strong); }
+.expand { position: absolute; top: 2px; right: 4px; }
+.actions { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 6px 4px var(--pad); color: var(--muted); font: 400 12px/18px var(--sans); }
+.agent-label { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.agent-label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-state { display: inline-flex; align-items: center; gap: 4px; padding-left: 8px; border-left: 1px solid var(--border-strong); white-space: nowrap; }
+.send { position: relative; margin-left: auto; background: transparent; }
+.send::before { content: ""; position: absolute; width: 26px; height: 26px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--pressed); }
+.send svg { position: relative; }
+.send:disabled { color: #666; cursor: not-allowed; }
+.send:disabled::before { background: var(--raised); border-color: var(--border); }
+.panel.composing form { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.panel.composing footer { flex: 1; min-height: 0; }
+.panel.composing .scroll, .panel.composing .latest { display: none; }
+.panel.composing textarea { flex: 1; height: auto !important; max-height: none; min-height: 0; }
+.latest { position: absolute; left: 50%; bottom: calc(var(--dock) + 12px); z-index: 1; border: 1px solid var(--border-strong); background: var(--base); opacity: 0; visibility: hidden; transform: translate(-50%, 6px); pointer-events: none; transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s; }
+.latest.show { opacity: 1; visibility: visible; transform: translate(-50%, 0); pointer-events: auto; }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-state="running"] .dots rect { animation: none; opacity: 0.7; }
-  .shimmer { animation: none; background: none; -webkit-text-fill-color: currentColor; }
-  .shimmer svg { animation: none; }
+  [data-state="running"] .ind::before, .shimmer svg { animation: none; }
   .chev, .latest { transition: none; }
 }
-@media (prefers-reduced-transparency: reduce) { footer::before { display: none; } }
 </style>
 </head>
 <body data-state="warming">
 <header id="header">
-  <div class="bar"><span class="ind" id="indicator" aria-hidden="true"><svg class="dots" width="16" height="16" viewBox="0 0 16 16">${dots}</svg><svg class="ok" data-icon="circle-check"></svg><svg class="bad" data-icon="warning"></svg></span><span class="sr" id="state" role="status">Connecting</span><h1 id="title">${name} is getting ready</h1><a class="pr" id="pr" target="_blank" rel="noopener" aria-label="Pull request" hidden><svg data-icon="link"></svg></a></div>
+  <div class="bar"><h1 id="title">${name} is getting ready</h1><span class="private" title="Private handoff · anyone with the watch link can access" role="img" aria-label="Private handoff; anyone with the watch link can access"><svg data-icon="lock"></svg></span><a class="icon-button pr" id="pr" target="_blank" rel="noopener" aria-label="Open pull request" title="Open pull request" hidden><svg data-icon="git-pull-request"></svg></a></div>
   ${opencodeNote}
 </header>
 <div class="panel">
 <div class="scroll" id="scroll"><main><div class="feed" id="feed" aria-live="polite"></div></main></div>
-<button class="latest" id="latest" type="button" aria-label="Jump to latest"><svg data-icon="chevron-down"></svg></button>
+<button class="icon-button latest" id="latest" type="button" aria-label="Jump to latest" title="Jump to latest"><svg data-icon="arrow-down"></svg></button>
 <footer id="footer">
   <p class="hint" id="hint" role="status"></p>
-  <form id="send"><textarea id="text" rows="1" placeholder="Message ${name}" aria-label="Message ${name}" enterkeyhint="send"></textarea><div class="actions"><button class="send" id="go" type="submit" aria-label="Send"><svg data-icon="arrow-up"></svg></button></div></form>
+  <form id="send">
+    <textarea id="text" rows="1" placeholder="Message ${name}…" aria-label="Message ${name}" enterkeyhint="send"></textarea>
+    <button class="icon-button expand" id="expand" type="button" aria-label="Expand composer" aria-expanded="false" title="Expand composer"><svg data-icon="expand"></svg></button>
+    <div class="actions">
+      <span class="agent-label"><svg data-icon="console"></svg><span>${name}</span></span>
+      <span class="run-state"><span class="ind" id="indicator" aria-hidden="true"><svg class="ok" data-icon="circle-check"></svg><svg class="bad" data-icon="warning"></svg></span><span id="state" role="status">Connecting</span></span>
+      <button class="icon-button send" id="go" type="submit" aria-label="Send message" title="Send message"><svg data-icon="send"></svg></button>
+    </div>
+  </form>
 </footer>
 </div>
 <script>(${client})()</script>
@@ -444,8 +447,16 @@ function client() {
   const hint = document.getElementById("hint");
   const states = { warming: "Getting ready", waiting_for_idle: "Getting ready", running: "Working", completed: "Done", failed: "Failed" };
 
-  // OpenCode's icon artwork (packages/ui/src/icons), 20 by 20.
+  // Tool artwork from OpenCode (MIT); original chrome icons use the same 20px
+  // view box. A 1.5px stroke renders at Zed's 1.2px weight in a 16px icon.
   const ICONS = {
+    lock: '<rect x="5" y="9" width="10" height="8" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M7 9V6a3 3 0 0 1 6 0v3m-3 3v2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
+    "git-pull-request": '<g stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="4" r="2"/><circle cx="5" cy="16" r="2"/><circle cx="15" cy="16" r="2"/><path d="M5 6v8m10 0V7a3 3 0 0 0-3-3H9m3-3L9 4l3 3"/></g>',
+    send: '<path d="m4 4 12 6-12 6 2-6zm2 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+    expand: '<path d="M12 3h5v5m0-5-6 6M8 17H3v-5m0 5 6-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+    collapse: '<path d="m17 3-6 6m0-5v5h5M3 17l6-6m-5 0h5v5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+    copy: '<rect x="7" y="7" width="10" height="10" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M12 4V3H3v9h1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+    "arrow-down": '<path d="M10 3v14m-5-5 5 5 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
     console: '<path d="M3.75 5.4165L8.33333 9.99984L3.75 14.5832M10.4167 14.5832H16.25" stroke="currentColor" stroke-linecap="square"/>',
     glasses: '<path d="M0.416626 7.91667H1.66663M19.5833 7.91667H18.3333M11.866 7.57987C11.3165 7.26398 10.6793 7.08333 9.99996 7.08333C9.32061 7.08333 8.68344 7.26398 8.13389 7.57987M8.74996 10C8.74996 12.0711 7.07103 13.75 4.99996 13.75C2.92889 13.75 1.24996 12.0711 1.24996 10C1.24996 7.92893 2.92889 6.25 4.99996 6.25C7.07103 6.25 8.74996 7.92893 8.74996 10ZM18.75 10C18.75 12.0711 17.071 13.75 15 13.75C12.9289 13.75 11.25 12.0711 11.25 10C11.25 7.92893 12.9289 6.25 15 6.25C17.071 6.25 18.75 7.92893 18.75 10Z" stroke="currentColor" stroke-linecap="square"/>',
     "code-lines": '<path d="M2.08325 3.75H11.2499M14.5833 3.75H17.9166M2.08325 10L7.08325 10M10.4166 10L17.9166 10M2.08325 16.25L8.74992 16.25M12.0833 16.25L17.9166 16.25" stroke="currentColor" stroke-linecap="square" stroke-linejoin="round"/>',
@@ -485,7 +496,7 @@ function client() {
   const atBottom = () => scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 80;
   let pinned = true;
   scroller.addEventListener("scroll", () => { pinned = atBottom(); latest.classList.toggle("show", !pinned); }, { passive: true });
-  latest.addEventListener("click", () => { pinned = true; scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" }); });
+  latest.addEventListener("click", () => { pinned = true; scroller.scrollTo({ top: scroller.scrollHeight, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" }); });
   const follow = () => { if (pinned) scroller.scrollTop = scroller.scrollHeight; };
 
   let phase = "";
@@ -571,6 +582,24 @@ function client() {
         div.append(p);
       }
     });
+    const actions = el("div", "response-actions");
+    const copy = el("button", "icon-button copy");
+    copy.type = "button";
+    copy.title = "Copy response";
+    copy.setAttribute("aria-label", "Copy response");
+    copy.innerHTML = svg("copy");
+    copy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        copy.innerHTML = svg("check");
+        copy.setAttribute("aria-label", "Copied response");
+        setTimeout(() => { copy.innerHTML = svg("copy"); copy.setAttribute("aria-label", "Copy response"); }, 1600);
+      } catch {
+        hint.textContent = "Couldn't copy. Select the response text to copy it.";
+      }
+    });
+    actions.append(copy);
+    div.append(actions);
     add(div);
   }
 
@@ -578,7 +607,7 @@ function client() {
     const calls = [...g.querySelectorAll(".tool")];
     const kinds = [...new Set(calls.map((call) => call.dataset.icon || "tool"))];
     g.querySelector(".gtrig b").innerHTML = kinds.map((kind) => svg(TOOL_ICON[kind] || "mcp")).join("");
-    g.querySelector(".gtrig .n").textContent = calls.length;
+    g.querySelector(".gtrig .n").textContent = "Used " + calls.length + (calls.length === 1 ? " tool" : " tools");
     g.querySelector(".gtrig").setAttribute("aria-label", calls.length + " tool calls");
     g.querySelector(".gl").classList.toggle("shimmer", calls.some((call) => call.dataset.state === "running"));
   }
@@ -697,7 +726,20 @@ function client() {
 
   const text = document.getElementById("text");
   const go = document.getElementById("go");
-  const grow = () => { text.style.height = "auto"; text.style.height = Math.min(Math.max(text.scrollHeight, 60), 180) + "px"; };
+  const expand = document.getElementById("expand");
+  const panel = document.querySelector(".panel");
+  const setExpanded = (open) => {
+    panel.classList.toggle("composing", open);
+    expand.setAttribute("aria-expanded", open);
+    expand.setAttribute("aria-label", open ? "Collapse composer" : "Expand composer");
+    expand.title = open ? "Collapse composer" : "Expand composer";
+    expand.innerHTML = svg(open ? "collapse" : "expand");
+    text.focus();
+    if (!open) { grow(); follow(); }
+  };
+  expand.addEventListener("click", () => setExpanded(!panel.classList.contains("composing")));
+  text.addEventListener("keydown", (e) => { if (e.key === "Escape" && panel.classList.contains("composing")) setExpanded(false); });
+  const grow = () => { text.style.height = "auto"; text.style.height = Math.min(Math.max(text.scrollHeight, 88), 180) + "px"; };
   const ready = () => { go.disabled = !text.value.trim(); };
   text.addEventListener("input", grow);
   text.addEventListener("input", ready);
@@ -715,6 +757,7 @@ function client() {
       const response = await fetch("/_handoff/message", { method: "POST", body: message });
       if (!response.ok) throw new Error((await response.json()).error);
       text.value = ""; grow(); hint.textContent = "";
+      if (panel.classList.contains("composing")) setExpanded(false);
     } catch (error) {
       bubble.remove();
       hint.textContent = "Not sent: " + error.message;
