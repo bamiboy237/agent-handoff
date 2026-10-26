@@ -84,13 +84,20 @@ function pairingLink() {
 // items; any other line goes out as text for the page to sort.
 function streamEvents(req, res) {
   res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
-  const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  let offset = Math.max(0, size(LOG) - BACKLOG_BYTES);
-  let midLine = offset > 0; // a backlog that starts inside a line skips that line
+  const send = (event, data, id) => res.write(`${id === undefined ? "" : `id: ${id}\n`}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  // Byte offsets resume on whole-line boundaries, even after the server restarts.
+  const cursor = req.headers["last-event-id"];
+  const resume = /^\d+$/.test(cursor ?? "") && Number.isSafeInteger(Number(cursor));
+  let offset = resume ? Number(cursor) : Math.max(0, size(LOG) - BACKLOG_BYTES);
+  let midLine = !resume && offset > 0;
   let lastStatus = "";
   const tick = () => {
     const end = size(LOG);
-    if (end < offset) offset = 0;
+    if (end < offset) {
+      offset = 0;
+      midLine = false;
+      send("reset", null, "");
+    }
     const chunk = end > offset ? readRange(LOG, offset, end) : Buffer.alloc(0);
     const cut = chunk.lastIndexOf(10);
     if (cut >= 0) {
@@ -99,7 +106,7 @@ function streamEvents(req, res) {
       if (midLine) lines.shift();
       midLine = false;
       const entries = lines.flatMap((line) => parseLine(AGENT, line, WORKDIR) ?? [line]);
-      if (entries.length) send("log", entries);
+      send("log", entries, offset);
     }
     const status = JSON.stringify({
       state: read("state") || "warming",
@@ -181,10 +188,15 @@ const server = createServer(async (req, res) => {
     return res.end("This link needs its key. Open the full link from your agent.");
   }
   // The first visit trades the key in the URL for a cookie, then drops it from the address.
+  // The Secure flag is only set when the browser-facing scheme is HTTPS: WebKit
+  // will not store or send a Secure cookie from a plain HTTP origin, while
+  // Chromium allows it on localhost, so an unconditional flag breaks WebKit.
   if (url.searchParams.has("key")) {
     url.searchParams.delete("key");
+    const forwardedProto = (req.headers["x-forwarded-proto"] ?? "").split(",")[0].trim().toLowerCase();
+    const secureCookie = req.socket.encrypted || forwardedProto === "https" ? "; Secure" : "";
     res.writeHead(303, {
-      "set-cookie": `${COOKIE}=${encodeURIComponent(KEY)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
+      "set-cookie": `${COOKIE}=${encodeURIComponent(KEY)}; Path=/; HttpOnly${secureCookie}; SameSite=Lax; Max-Age=2592000`,
       location: `${url.pathname}${url.search}`,
     });
     return res.end();
@@ -222,154 +234,146 @@ server.on("upgrade", (req, socket, head) => {
   socket.on("error", () => upstream.destroy());
 });
 
-server.listen(PORT, "0.0.0.0");
+server.listen(PORT, process.env.WATCH_HOST || "0.0.0.0");
 
 function page() {
   const name = escapeHtml(label);
+  // Agent marks from the supplied artwork. The name stays in the label.
+  const agentMarks = {
+    claude: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect width="24" height="24" rx="5" fill="#D97757"/><path transform="translate(3.1 3.1) scale(.745)" fill="#F8F1E7" d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>',
+    codex: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><defs><linearGradient id="agent-codex-gradient" x1="12" x2="12" y1="3" y2="21" gradientUnits="userSpaceOnUse"><stop stop-color="#B1A7FF"/><stop offset=".5" stop-color="#7A9DFF"/><stop offset="1" stop-color="#3941FF"/></linearGradient></defs><path fill="url(#agent-codex-gradient)" d="M9.064 3.344a4.6 4.6 0 0 1 2.285-.312q1.5.173 2.673 1.275.016.015.037.021a.1.1 0 0 0 .043 0 4.55 4.55 0 0 1 3.046.275l.047.022.116.057a4.58 4.58 0 0 1 2.188 2.399q.313.765.315 1.595a4.2 4.2 0 0 1-.134 1.223.12.12 0 0 0 .03.115q.89.91 1.183 2.17.433 2.138-.887 3.854l-.136.166a4.55 4.55 0 0 1-2.201 1.388.12.12 0 0 0-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838q-1.78-.009-3.157-1.302a.11.11 0 0 0-.105-.024c-.388.125-.78.143-1.204.138a4.44 4.44 0 0 1-1.945-.466 4.54 4.54 0 0 1-1.61-1.335c-.152-.202-.303-.392-.414-.617a6 6 0 0 1-.37-.961 4.6 4.6 0 0 1-.014-2.298.1.1 0 0 0 .006-.056.1.1 0 0 0-.027-.048 4.5 4.5 0 0 1-1.034-1.651 3.9 3.9 0 0 1-.251-1.192 5.2 5.2 0 0 1 .141-1.6Q3.659 7.92 5.086 6.97q.318-.212.601-.33a6 6 0 0 1 .646-.227.1.1 0 0 0 .065-.066 4.5 4.5 0 0 1 .829-1.615 4.54 4.54 0 0 1 1.837-1.388"/><path fill="#fff" d="M12.546 13.909a.637.637 0 0 0 0 1.272h3.636a.637.637 0 1 0 0-1.272zM8.462 9.23a.637.637 0 0 0-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 1 0 1.095.649l1.454-2.455a.64.64 0 0 0 .005-.64z"/></svg>',
+    pi: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5h16v4H4z" fill="#F09082"/><path d="M6.5 9H10v10H6.5z" fill="#4D9ABF"/><path d="M14 9h3.5v10H14z" fill="#F1BE58"/></svg>',
+    opencode: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2" fill="#ECE7E7"/><path d="M8 8h8v8H8z" fill="#211E1E"/><path d="M10 10h4v4h-4z" fill="#6B6666"/></svg>',
+  };
+  const agentMark = agentMarks[AGENT]
+    ? `<span class="agent-mark" role="img" aria-label="${name}" title="${name}">${agentMarks[AGENT]}</span>`
+    : `<span class="agent-name">${name}</span>`;
   const opencodeNote =
     AGENT === "opencode"
       ? `<p class="note">OpenCode's full app opens here once the agent starts. Reload in a moment.</p>`
       : "";
-  // OpenCode's working indicator: a 5 by 5 grid of 2px squares that pulse in a diagonal wave.
-  const dots = Array.from({ length: 25 }, (_, i) => {
-    const x = i % 5;
-    const y = Math.floor(i / 5);
-    return `<rect x="${1 + x * 3}" y="${1 + y * 3}" width="2" height="2" style="--d:${(x + y) * 90}ms"/>`;
-  }).join("");
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#080808">
+<meta name="theme-color" content="#000000">
 <title>${name} handoff</title>
 <style>
-/* Styled after the web UI of OpenCode (https://github.com/anomalyco/opencode, MIT License).
-   Dark tokens follow packages/ui/src/theme/v2, markup and metrics follow packages/session-ui
-   and packages/app. Inter and IBM Plex Mono are inlined as subsets. */
+/* Zed-inspired agent panel: black transcript, neutral message blocks, hairline
+   chrome and a flush composer. Fonts stay inlined so sandbox pages work offline. */
 @font-face { font-family: "Inter"; src: url(data:font/woff2;base64,${INTER_WOFF2}) format("woff2"); font-weight: 400 670; font-display: swap; }
 @font-face { font-family: "IBM Plex Mono"; src: url(data:font/woff2;base64,${PLEX_WOFF2}) format("woff2"); font-weight: 400 500; font-display: swap; }
 :root {
-  --deep: #080808; --base: #161616; --raised: #242424; --layer-01: #3a3a3a;
-  --text: #fafafa; --muted: #aeaeae; --faint: #808080; --icon: #dbdbdb;
-  --border: rgba(255, 255, 255, 0.1);
-  --hover: rgba(255, 255, 255, 0.06); --pressed: rgba(255, 255, 255, 0.1);
-  --user-bg: #021945; --user-text: #c3d4fd;
-  --accent: #a2bcff; --success: #6bd586; --danger: #f17471; --focus: #7698fd;
+  --deep: #000000; --base: #191919; --raised: #242424;
+  --text: #cccccc; --muted: #a0a0a0; --faint: #858585; --icon: #a0a0a0;
+  --border: #292929; --border-strong: #373737;
+  --hover: #242424; --pressed: #303030;
+  --accent: #a2bcff; --success: #78c78b; --danger: #ef9292; --focus: #a2bcff;
   --sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  --session: 744px;
+  --session: 820px;
   --pad: 16px;
-  --inset: 1px;
-  --raise: 0 2px 4px 0 rgba(0, 0, 0, 0.3), 0 1px 2px 0 rgba(0, 0, 0, 0.3), 0 0 0 0.5px rgba(255, 255, 255, 0.16), 0 -0.5px 0 0 rgba(255, 255, 255, 0.06);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
-@media (min-width: 768px) { :root { --pad: 24px; --inset: 8px; } }
+@media (min-width: 768px) { :root { --pad: 24px; } }
 * { box-sizing: border-box; }
-html { height: 100%; background: var(--deep); color-scheme: dark; }
-body { height: 100%; margin: 0; padding: 1px; display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none; background: var(--deep); color: #fff; font: 440 13px/24px var(--sans); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; -webkit-tap-highlight-color: transparent; }
-::selection { background: rgba(118, 152, 253, 0.35); }
+html { height: 100%; background: var(--deep); color-scheme: dark; overscroll-behavior: none; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { height: 100vh; height: 100dvh; margin: 0; display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none; background: var(--deep); color: var(--text); font: 400 14px/22px var(--sans); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; -webkit-tap-highlight-color: transparent; }
+::selection { background: rgba(162, 188, 255, 0.3); }
 svg { flex: none; }
 button { font: inherit; color: inherit; }
+button, .icon-button { touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
-/* Title bar on the deep background, 36px (app header). */
-header { flex: none; padding: calc(8px + env(safe-area-inset-top)) 8px 0; }
-.bar { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; }
-.bar h1 { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 440 13px/16px var(--sans); color: var(--text); }
-@media (min-width: 768px) { .bar h1 { font-weight: 500; } }
-.note { margin: 4px 16px 0; font: 440 13px/16px var(--sans); letter-spacing: -0.04px; color: var(--muted); }
-.ind { position: relative; width: 16px; height: 16px; color: var(--faint); }
-.ind > svg { position: absolute; inset: 0; display: none; }
-.ind .dots { display: block; fill: currentColor; }
-.dots rect { opacity: 0.35; }
-[data-state="running"] .dots rect { animation: pixel 1.35s ease-in-out infinite; animation-delay: var(--d); }
-[data-state="completed"] .dots, [data-state="failed"] .dots { display: none; }
-[data-state="completed"] .ok { display: block; color: var(--success); }
-[data-state="failed"] .bad { display: block; color: var(--danger); }
-@keyframes pixel { 0%, 100% { opacity: 0.2; } 45% { opacity: 1; } }
+/* A single hairline, not a floating session card. Controls have 44px tap areas. */
+header { flex: none; padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); border-bottom: 1px solid var(--border); }
+.bar { display: flex; align-items: center; gap: 4px; min-height: 60px; padding: 8px 6px 8px 16px; }
+.heading { flex: 1; min-width: 0; }
+.agent-name { display: block; color: var(--muted); font: 400 12px/18px var(--sans); }
+.agent-mark { display: inline-flex; width: 20px; height: 20px; margin-bottom: 2px; }
+.agent-mark svg { display: block; }
+.bar h1 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 14px/20px var(--sans); }
+.note { margin: 0 16px 12px; color: var(--muted); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.pr { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px; color: var(--faint); }
+.icon-button { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--icon); cursor: pointer; text-decoration: none; }
 .pr[hidden] { display: none; }
-.pr:active { background: var(--pressed); color: var(--icon); }
-@media (hover: hover) { .pr:hover { background: var(--hover); color: var(--icon); } }
+.icon-button:active { background: var(--pressed); color: var(--text); }
+@media (hover: hover) and (pointer: fine) { .icon-button:hover:not(:disabled) { background: var(--hover); color: var(--text); } }
 
-/* The session panel: raised, rounded, inset from the window edge. */
-.panel { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 8px var(--inset) calc(8px + env(safe-area-inset-bottom)); overflow: hidden; border-radius: 10px; background: var(--base); box-shadow: var(--raise); }
-.scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
-.scroll::-webkit-scrollbar { display: none; }
+/* Only the transcript scrolls. The composer stays above the phone's safe area. */
+.panel { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); }
+.scroll:focus-visible { outline-offset: -2px; }
+.scroll, pre.code, .shell > *, pre.out, .diff { overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 
-/* Timeline: a 744px column, px-4 and md:px-6. */
-main { max-width: var(--session); margin: 0 auto; padding: 16px var(--pad) 24px; }
+main { max-width: var(--session); margin: 0 auto; padding: 24px var(--pad) 28px; }
 .feed { display: flex; flex-direction: column; align-items: flex-start; }
 .feed > * { min-width: 0; max-width: 100%; margin-top: 16px; }
 .feed > :first-child { margin-top: 0; }
-.feed > .you, .feed > .you + * { margin-top: 52px; }
+.feed > .you, .feed > .you + * { margin-top: 28px; }
 .feed > .you:first-child { margin-top: 0; }
+.feed:empty::before { content: "Waiting for the agent…"; color: var(--faint); }
 
-/* Agent text (markdown.css). */
-.prose { width: 100%; font: 440 14px/160% var(--sans); overflow-wrap: break-word; color: var(--text); }
+/* Quiet proportional answers; mono for everything the user types or runs. */
+.prose { width: 100%; font: 400 15px/1.6 var(--sans); overflow-wrap: anywhere; color: var(--text); }
 .prose > :first-child { margin-top: 0; }
 .prose > :last-child { margin-bottom: 0; }
-.prose p { margin: 0 0 12px; white-space: pre-wrap; }
+.prose p { margin: 0 0 14px; white-space: pre-wrap; }
 .prose strong { font-weight: 670; }
 .prose a { color: var(--accent); text-decoration: none; }
-.prose a:hover { text-decoration: underline; text-underline-offset: 2px; }
+@media (hover: hover) and (pointer: fine) { .prose a:hover { text-decoration: underline; text-underline-offset: 2px; } }
 .prose h1, .prose h2, .prose h3 { color: var(--text); line-height: 150%; }
-.prose h1 { margin: 28px 0 12px; font-size: 17px; font-weight: 600; }
-.prose h2 { margin: 24px 0 10px; font-size: 15px; font-weight: 600; }
-.prose h3 { margin: 20px 0 8px; font-size: 13px; font-weight: 500; }
-.prose ul, .prose ol { margin: 8px 0 12px; padding-inline-start: 32px; }
+.prose h1 { margin: 28px 0 14px; font-size: 20px; font-weight: 400; }
+.prose h2 { margin: 24px 0 12px; font-size: 18px; font-weight: 400; }
+.prose h3 { margin: 20px 0 10px; font-size: 16px; font-weight: 400; }
+.prose ul, .prose ol { margin: 8px 0 14px; padding-inline-start: 22px; }
 .prose ul { list-style: disc; }
 .prose ol { list-style: decimal; padding-inline-start: 2.25rem; }
-.prose li { margin-bottom: 8px; }
+.prose li { margin-bottom: 4px; }
 .prose li::marker { color: var(--muted); }
-.prose :not(pre) > code { padding: 0 4px; border-radius: 4px; background: rgba(250, 250, 250, 0.08); font-family: var(--mono); font-weight: 500; }
-pre.code { margin: 12px 0 24px; padding: 12px; overflow: auto; border: 0.5px solid var(--border); border-radius: 6px; background: var(--deep); color: var(--text); font: 400 13px/150% var(--mono); scrollbar-width: none; }
-pre.code::-webkit-scrollbar { display: none; }
+.prose :not(pre) > code { padding: 1px 4px; border: 1px solid var(--border); border-radius: 3px; background: var(--base); font: 400 0.9em/1.5 var(--mono); }
+pre.code { margin: 14px 0 20px; padding: 12px; overflow: auto; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--base); color: var(--text); font: 400 14px/1.6 var(--mono); }
+.response-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
+.copy { color: var(--faint); }
 
-/* User message (message-part.css). */
-.you { align-self: flex-end; width: fit-content; max-width: min(82%, 64ch); margin: 0; padding: 8px 12px; border-radius: 8px; background: var(--user-bg); color: var(--user-text); font: 440 14px/21px var(--sans); white-space: pre-wrap; word-break: break-word; }
-.you.pending { opacity: 0.6; }
+/* Full-width prompts, like the reference, rather than right-aligned bubbles. */
+.you { width: 100%; margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--base); color: var(--text); font: 400 14px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.you.pending { color: var(--muted); border-style: dashed; }
 
-/* Tool calls fold into one "Used N ..." line (tool-collapsible). */
+/* Tool calls keep their existing folding behavior, with visible affordances. */
 .group { width: 100%; }
-.gtrig { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 28px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); font: 440 13px/16px var(--sans); letter-spacing: -0.04px; text-align: start; cursor: pointer; user-select: none; -webkit-user-select: none; }
-.gl { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
-.gtrig b { display: inline-flex; align-items: center; gap: 6px; color: var(--icon); }
-.chev { display: grid; place-items: center; width: 16px; height: 16px; color: var(--faint); opacity: 0; transform: rotate(-90deg); transition: opacity 0.15s ease, transform 0.15s ease; }
-.group.open > .gtrig .chev { opacity: 1; transform: none; }
-@media (hover: hover) { .gtrig:hover .chev, .trig:hover .chev { opacity: 1; } }
-.rows { display: flex; flex-direction: column; gap: 16px; padding: 12px 0 4px 12px; }
+.gtrig { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-height: 44px; padding: 0 8px 0 2px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font: 400 13px/18px var(--sans); text-align: start; cursor: pointer; user-select: none; -webkit-user-select: none; }
+.chev { display: grid; place-items: center; width: 16px; height: 16px; color: var(--faint); transform: rotate(-90deg); }
+.group.open > .gtrig .chev { transform: none; }
+.rows { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; padding: 0 0 4px 12px; border-left: 1px solid var(--border); }
 .rows[hidden] { display: none; }
 .tool { display: flex; flex-direction: column; min-width: 0; }
-.trig { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 20px; padding: 1px 0 3px; border: 0; background: none; font: 440 13px/16px var(--sans); letter-spacing: -0.04px; text-align: start; cursor: default; user-select: none; -webkit-user-select: none; }
+.trig { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 4px 0; border: 0; background: none; font: 400 13px/18px var(--sans); text-align: start; cursor: default; user-select: none; -webkit-user-select: none; }
 .tool.has-detail .trig { cursor: pointer; }
+.gtrig:active, .tool.has-detail .trig:active { background: var(--pressed); }
+@media (hover: hover) and (pointer: fine) { .gtrig:hover, .tool.has-detail .trig:hover { background: var(--hover); } }
+.tool:not(.has-detail) .chev { visibility: hidden; }
 .label { flex: none; display: inline-flex; color: var(--icon); }
-.sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); }
-.arg { flex: none; white-space: nowrap; color: var(--faint); }
+.sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.arg { flex: none; white-space: nowrap; color: var(--faint); font-feature-settings: "tnum"; }
 .arg .add { color: var(--success); }
 .arg .del { color: var(--danger); }
-.tool.open .chev { opacity: 1; transform: none; }
+.tool.open .chev { transform: none; }
 .tool[data-state="error"] .label, .tool[data-state="error"] .sub { color: var(--danger); }
-.label.shimmer svg, .gl.shimmer svg { animation: breathe 1.6s ease-in-out infinite; }
-@keyframes breathe { 50% { opacity: 0.4; } }
-.shimmer { background: linear-gradient(90deg, var(--faint) 0%, var(--text) 50%, var(--faint) 100%) 0 0 / 200% 100%; -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; animation: shimmer 1.6s linear infinite; }
-@keyframes shimmer { to { background-position: -200% 0; } }
-.detail { margin-top: 8px; }
+.tool[data-state="running"] .label { color: var(--text); }
+.detail { margin-top: 4px; }
 .detail[hidden] { display: none; }
 
 /* Tool output: shell block, plain output, diff, todos. */
-.shell { border: 0.5px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--raised); font: 440 13px/20px var(--mono); letter-spacing: -0.04px; }
-.shell > * { display: block; margin: 0; padding: 12px; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; scrollbar-width: none; }
-.shell > *::-webkit-scrollbar { display: none; }
+.shell { border: 1px solid var(--border-strong); border-radius: 6px; overflow: hidden; background: var(--base); font: 400 13px/20px var(--mono); }
+.shell > * { display: block; margin: 0; padding: 12px; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .shell .cmd { color: var(--text); }
-.shell .res { border-top: 0.5px solid var(--border); background: var(--base); color: var(--muted); }
-pre.out { margin: 0; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font: 440 13px/150% var(--mono); letter-spacing: -0.04px; scrollbar-width: none; }
-pre.out::-webkit-scrollbar { display: none; }
+.shell .res { border-top: 1px solid var(--border); background: var(--deep); color: var(--muted); }
+pre.out { margin: 0; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font: 440 13px/150% var(--mono); letter-spacing: -0.04px; }
 .tool[data-state="error"] pre.out { color: var(--danger); }
-.diff { border: 0.5px solid var(--border); border-radius: 6px; overflow: hidden; font: 440 13px/20px var(--mono); letter-spacing: -0.04px; max-height: 320px; overflow-y: auto; scrollbar-width: none; }
-.diff::-webkit-scrollbar { display: none; }
+.diff { border: 1px solid var(--border-strong); border-radius: 6px; overflow: hidden; font: 400 13px/20px var(--mono); max-height: 320px; overflow-y: auto; }
 .dl { display: flex; gap: 8px; padding: 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
 .dl i { flex: none; width: 1ch; font-style: normal; }
 .dl.add { background: rgba(107, 213, 134, 0.1); }
@@ -387,49 +391,63 @@ pre.out::-webkit-scrollbar { display: none; }
 .event.good { color: var(--success); }
 .event.bad { color: var(--danger); }
 .event a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
-.feed > pre.out { width: 100%; margin-top: 8px; padding: 12px; border: 0.5px solid var(--border); border-radius: 6px; }
+.feed > pre.out { width: 100%; margin-top: 8px; padding: 12px; border: 1px solid var(--border); border-radius: 6px; }
 
-/* Composer dock (composer/editor): 10px radius, 13/20 text, send 8px from the corner. */
-footer { position: relative; flex: none; display: flex; flex-direction: column; align-items: center; padding: 0 12px 12px; background: var(--base); }
-footer::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 16px; pointer-events: none; background: linear-gradient(to top, var(--base), transparent); }
+/* Flush, bordered composer with the same top-right expand and bottom-right send
+   arrangement as the reference. No decorative or unsupported model controls. */
+footer { position: relative; flex: none; display: flex; flex-direction: column; align-items: center; padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); border-top: 1px solid var(--border); background: var(--base); }
 .hint:empty { display: none; }
-.hint { width: 100%; max-width: calc(var(--session) - 24px); margin: 0 0 8px; padding: 0 4px; font: 440 13px/16px var(--sans); letter-spacing: -0.04px; color: var(--faint); }
+.hint { width: 100%; max-width: var(--session); margin: 0; padding: 8px var(--pad) 0; font: 400 12px/18px var(--sans); color: var(--muted); }
 .offline .hint { color: var(--danger); }
-form { position: relative; width: 100%; max-width: calc(var(--session) - 24px); min-height: 96px; margin: 0; overflow: clip; border-radius: 10px; background: var(--raised); box-shadow: var(--raise); }
-textarea { display: block; width: 100%; min-height: 60px; max-height: 180px; margin: 0; padding: 16px 16px 8px; resize: none; border: 0; background: transparent; color: var(--text); font: 440 13px/20px var(--sans); }
+[data-state="failed"] .hint { color: var(--danger); }
+form { position: relative; width: 100%; max-width: var(--session); margin: 0; }
+textarea { display: block; width: 100%; min-height: 88px; max-height: min(180px, 40dvh); margin: 0; padding: 16px 52px 8px var(--pad); resize: none; border: 0; border-radius: 0; background: transparent; color: var(--text); font: 400 16px/1.6 var(--mono); }
 textarea::placeholder { color: var(--faint); }
 textarea:focus-visible { outline: none; }
-.actions { display: flex; align-items: center; justify-content: flex-end; height: 44px; padding: 0 8px; }
-.send { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 6px; border: 0; border-radius: 6px; color: var(--base); cursor: pointer; user-select: none;
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0) 100%), linear-gradient(90deg, var(--icon) 0%, var(--icon) 100%);
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(255, 255, 255, 0.4), 0 -0.5px 0 0 rgba(255, 255, 255, 0.3); }
-.send svg { width: 16px; height: 16px; }
-@media (hover: hover) { .send:hover:not(:disabled) { background-image: linear-gradient(90deg, rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.08)), linear-gradient(180deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0) 100%), linear-gradient(90deg, var(--icon) 0%, var(--icon) 100%); } }
-.send:active:not(:disabled) { background-image: linear-gradient(90deg, rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.4)), linear-gradient(180deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0) 100%), linear-gradient(90deg, var(--icon) 0%, var(--icon) 100%); }
-.send:disabled { opacity: 0.4; cursor: not-allowed; }
-.latest { position: absolute; left: 50%; bottom: calc(var(--dock) + 12px); z-index: 25; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 14px; background: var(--raised); color: var(--icon); box-shadow: 0 8px 16px 0 rgba(0, 0, 0, 0.3), 0 4px 8px 0 rgba(0, 0, 0, 0.3), 0 0 0 0.5px rgba(255, 255, 255, 0.16), 0 -0.5px 0 0 rgba(255, 255, 255, 0.06); opacity: 0; transform: translate(-50%, 6px); pointer-events: none; transition: opacity 0.15s ease, transform 0.15s ease; cursor: pointer; }
-.latest.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+form:focus-within { box-shadow: inset 0 2px 0 var(--focus); }
+.expand { position: absolute; top: 2px; right: 4px; }
+.actions { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 6px 4px var(--pad); color: var(--muted); font: 400 12px/18px var(--sans); }
+.send { position: relative; margin-left: auto; background: transparent; }
+.send::before { content: ""; position: absolute; width: 26px; height: 26px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--pressed); }
+.send svg { position: relative; }
+.send:not(:disabled) { color: var(--text); }
+.send:disabled { color: #666; cursor: not-allowed; }
+.send:disabled::before { background: var(--raised); border-color: var(--border); }
+.send[data-mode="working"], .send[data-mode="sending"] { color: var(--muted); }
+.send[data-mode="working"] svg, .send[data-mode="sending"] svg { animation: working 1s linear infinite; }
+@keyframes working { to { transform: rotate(360deg); } }
+.panel.composing form { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.panel.composing footer { flex: 1; min-height: 0; }
+.panel.composing .scroll, .panel.composing .latest { display: none; }
+.panel.composing textarea { flex: 1; height: auto !important; max-height: none; min-height: 0; }
+.latest { position: absolute; left: 50%; bottom: calc(var(--dock, 0px) + 12px); z-index: 1; border: 1px solid var(--border-strong); background: var(--base); opacity: 0; visibility: hidden; transform: translate(-50%, 6px); pointer-events: none; transition: opacity 0.15s var(--ease-out), transform 0.15s var(--ease-out), visibility 0.15s; }
+.latest.show { opacity: 1; visibility: visible; transform: translate(-50%, 0); pointer-events: auto; }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-state="running"] .dots rect { animation: none; opacity: 0.7; }
-  .shimmer { animation: none; background: none; -webkit-text-fill-color: currentColor; }
-  .shimmer svg { animation: none; }
-  .chev, .latest { transition: none; }
+  .latest { transition: none; transform: translate(-50%, 0); }
+  .send[data-mode] svg { animation: none; }
 }
-@media (prefers-reduced-transparency: reduce) { footer::before { display: none; } }
 </style>
 </head>
 <body data-state="warming">
 <header id="header">
-  <div class="bar"><span class="ind" id="indicator" aria-hidden="true"><svg class="dots" width="16" height="16" viewBox="0 0 16 16">${dots}</svg><svg class="ok" data-icon="circle-check"></svg><svg class="bad" data-icon="warning"></svg></span><span class="sr" id="state" role="status">Connecting</span><h1 id="title">${name} is getting ready</h1><a class="pr" id="pr" target="_blank" rel="noopener" aria-label="Pull request" hidden><svg data-icon="link"></svg></a></div>
+  <div class="bar"><div class="heading">${agentMark}<h1 id="title">${name} is getting ready</h1></div><a class="icon-button pr" id="pr" target="_blank" rel="noopener" aria-label="Open pull request" title="Open pull request" hidden><svg data-icon="git-pull-request"></svg></a></div>
   ${opencodeNote}
 </header>
 <div class="panel">
-<div class="scroll" id="scroll"><main><div class="feed" id="feed" aria-live="polite"></div></main></div>
-<button class="latest" id="latest" type="button" aria-label="Jump to latest"><svg data-icon="chevron-down"></svg></button>
+<div class="scroll" id="scroll" role="region" aria-label="Agent transcript" tabindex="0"><main><div class="feed" id="feed"></div></main></div>
+<p class="sr" id="activity" role="status" aria-atomic="true"></p>
+<p class="sr" id="state" role="status">Connecting</p>
+<button class="icon-button latest" id="latest" type="button" aria-label="Jump to latest" title="Jump to latest"><svg data-icon="arrow-down"></svg></button>
 <footer id="footer">
   <p class="hint" id="hint" role="status"></p>
-  <form id="send"><textarea id="text" rows="1" placeholder="Message ${name}" aria-label="Message ${name}" enterkeyhint="send"></textarea><div class="actions"><button class="send" id="go" type="submit" aria-label="Send"><svg data-icon="arrow-up"></svg></button></div></form>
+  <form id="send">
+    <textarea id="text" rows="1" placeholder="Message ${name}…" aria-label="Message ${name}" enterkeyhint="send"></textarea>
+    <button class="icon-button expand" id="expand" type="button" aria-label="Expand composer" aria-expanded="false" title="Expand composer"><svg data-icon="expand"></svg></button>
+    <div class="actions">
+      <button class="icon-button send" id="go" type="submit" aria-label="Send message" title="Send message"><svg data-icon="send"></svg></button>
+    </div>
+  </form>
 </footer>
 </div>
 <script>(${client})()</script>
@@ -442,10 +460,19 @@ function client() {
   const feed = document.getElementById("feed");
   const latest = document.getElementById("latest");
   const hint = document.getElementById("hint");
+  const activity = document.getElementById("activity");
   const states = { warming: "Getting ready", waiting_for_idle: "Getting ready", running: "Working", completed: "Done", failed: "Failed" };
 
-  // OpenCode's icon artwork (packages/ui/src/icons), 20 by 20.
+  // Tool artwork from OpenCode (MIT); original chrome icons use the same 20px
+  // view box. A 1.5px stroke renders at Zed's 1.2px weight in a 16px icon.
   const ICONS = {
+    "git-pull-request": '<g stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="4" r="2"/><circle cx="5" cy="16" r="2"/><circle cx="15" cy="16" r="2"/><path d="M5 6v8m10 0V7a3 3 0 0 0-3-3H9m3-3L9 4l3 3"/></g>',
+    send: '<path d="m4 4 12 6-12 6 2-6zm2 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+    working: '<circle cx="10" cy="10" r="6.5" stroke="currentColor" stroke-width="1.5" opacity=".25"/><path d="M10 3.5a6.5 6.5 0 0 1 6.5 6.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
+    expand: '<path d="M12 3h5v5m0-5-6 6M8 17H3v-5m0 5 6-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+    collapse: '<path d="m17 3-6 6m0-5v5h5M3 17l6-6m-5 0h5v5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+    copy: '<rect x="7" y="7" width="10" height="10" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M12 4V3H3v9h1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+    "arrow-down": '<path d="M10 3v14m-5-5 5 5 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
     console: '<path d="M3.75 5.4165L8.33333 9.99984L3.75 14.5832M10.4167 14.5832H16.25" stroke="currentColor" stroke-linecap="square"/>',
     glasses: '<path d="M0.416626 7.91667H1.66663M19.5833 7.91667H18.3333M11.866 7.57987C11.3165 7.26398 10.6793 7.08333 9.99996 7.08333C9.32061 7.08333 8.68344 7.26398 8.13389 7.57987M8.74996 10C8.74996 12.0711 7.07103 13.75 4.99996 13.75C2.92889 13.75 1.24996 12.0711 1.24996 10C1.24996 7.92893 2.92889 6.25 4.99996 6.25C7.07103 6.25 8.74996 7.92893 8.74996 10ZM18.75 10C18.75 12.0711 17.071 13.75 15 13.75C12.9289 13.75 11.25 12.0711 11.25 10C11.25 7.92893 12.9289 6.25 15 6.25C17.071 6.25 18.75 7.92893 18.75 10Z" stroke="currentColor" stroke-linecap="square"/>',
     "code-lines": '<path d="M2.08325 3.75H11.2499M14.5833 3.75H17.9166M2.08325 10L7.08325 10M10.4166 10L17.9166 10M2.08325 16.25L8.74992 16.25M12.0833 16.25L17.9166 16.25" stroke="currentColor" stroke-linecap="square" stroke-linejoin="round"/>',
@@ -454,14 +481,8 @@ function client() {
     task: '<path d="M9.99992 2.0835V17.9168M7.08325 3.75016H2.08325V16.2502H7.08325M12.9166 16.2502H17.9166V3.75016H12.9166" stroke="currentColor" stroke-linecap="square"/>',
     checklist: '<path d="M9.58342 13.7498H17.0834M9.58342 6.24984H17.0834M2.91675 6.6665L4.58341 7.9165L7.08341 4.1665M2.91675 14.1665L4.58341 15.4165L7.08341 11.6665" stroke="currentColor" stroke-linecap="square"/>',
     mcp: '<g><path d="M0.972656 9.37176L9.5214 1.60019C10.7018 0.527151 12.6155 0.527151 13.7957 1.60019C14.9761 2.67321 14.9761 4.41295 13.7957 5.48599L7.3397 11.3552" stroke="currentColor" stroke-linecap="round"/><path d="M7.42871 11.2747L13.7957 5.48643C14.9761 4.41338 16.8898 4.41338 18.0702 5.48643L18.1147 5.52688C19.2951 6.59993 19.2951 8.33966 18.1147 9.4127L10.3831 16.4414C9.98966 16.7991 9.98966 17.379 10.3831 17.7366L11.9707 19.1799" stroke="currentColor" stroke-linecap="round"/><path d="M11.6587 3.54346L5.33619 9.29119C4.15584 10.3642 4.15584 12.1039 5.33619 13.177C6.51649 14.25 8.43019 14.25 9.61054 13.177L15.9331 7.42923" stroke="currentColor" stroke-linecap="round"/></g>',
-    "chevron-down": '<path d="M6.6665 8.33325L9.99984 11.6666L13.3332 8.33325" stroke="currentColor" stroke-linecap="square"/>',
-    "arrow-up": '<path fill-rule="evenodd" clip-rule="evenodd" d="M9.99991 2.24121L16.0921 8.33343L15.2083 9.21731L10.6249 4.63397V17.5001H9.37492V4.63398L4.7916 9.21731L3.90771 8.33343L9.99991 2.24121Z" fill="currentColor"/>',
     check: '<path d="M6.5 11.4412L8.97059 13.5L13.5 6.5" stroke="currentColor" stroke-linecap="square"/>',
-    "circle-check": '<path d="M12.4987 7.91732L8.7487 12.5007L7.08203 10.834M17.9154 10.0007C17.9154 14.3729 14.371 17.9173 9.9987 17.9173C5.62644 17.9173 2.08203 14.3729 2.08203 10.0007C2.08203 5.6284 5.62644 2.08398 9.9987 2.08398C14.371 2.08398 17.9154 5.6284 17.9154 10.0007Z" stroke="currentColor" stroke-linecap="square"/>',
-    warning: '<path d="M10 7.91667V11.6667M10 13.7417V13.75M10 2.5L1.875 16.25H18.125L10 2.5Z" stroke="currentColor" stroke-linecap="square"/>',
-    link: '<path d="M2.08334 12.0833L1.72979 11.7298L1.37624 12.0833L1.72979 12.4369L2.08334 12.0833ZM7.91668 17.9167L7.56312 18.2702L7.91668 18.6238L8.27023 18.2702L7.91668 17.9167ZM17.9167 7.91666L18.2702 8.27022L18.6238 7.91666L18.2702 7.56311L17.9167 7.91666ZM12.0833 2.08333L12.4369 1.72977L12.0833 1.37622L11.7298 1.72977L12.0833 2.08333ZM8.39646 5.06311L8.0429 5.41666L8.75001 6.12377L9.10356 5.77021L8.75001 5.41666L8.39646 5.06311ZM5.77023 9.10355L6.12378 8.74999L5.41668 8.04289L5.06312 8.39644L5.41668 8.74999L5.77023 9.10355ZM14.2298 10.8964L13.8762 11.25L14.5833 11.9571L14.9369 11.6035L14.5833 11.25L14.2298 10.8964ZM11.6036 14.9369L11.9571 14.5833L11.25 13.8762L10.8965 14.2298L11.25 14.5833L11.6036 14.9369ZM7.14646 12.1464L6.7929 12.5L7.50001 13.2071L7.85356 12.8535L7.50001 12.5L7.14646 12.1464ZM12.8536 7.85355L13.2071 7.49999L12.5 6.79289L12.1465 7.14644L12.5 7.49999L12.8536 7.85355ZM2.08334 12.0833L1.72979 12.4369L7.56312 18.2702L7.91668 17.9167L8.27023 17.5631L2.4369 11.7298L2.08334 12.0833ZM17.9167 7.91666L18.2702 7.56311L12.4369 1.72977L12.0833 2.08333L11.7298 2.43688L17.5631 8.27022L17.9167 7.91666ZM12.0833 2.08333L11.7298 1.72977L8.39646 5.06311L8.75001 5.41666L9.10356 5.77021L12.4369 2.43688L12.0833 2.08333ZM5.41668 8.74999L5.06312 8.39644L1.72979 11.7298L2.08334 12.0833L2.4369 12.4369L5.77023 9.10355L5.41668 8.74999ZM14.5833 11.25L14.9369 11.6035L18.2702 8.27022L17.9167 7.91666L17.5631 7.56311L14.2298 10.8964L14.5833 11.25ZM7.91668 17.9167L8.27023 18.2702L11.6036 14.9369L11.25 14.5833L10.8965 14.2298L7.56312 17.5631L7.91668 17.9167ZM7.50001 12.5L7.85356 12.8535L12.8536 7.85355L12.5 7.49999L12.1465 7.14644L7.14646 12.1464L7.50001 12.5Z" fill="currentColor"/>',
   };
-  // Each call shows OpenCode's icon for its tool; a run of calls folds into one line of icons and a count.
   const TOOL_ICON = { run: "console", read: "glasses", edit: "code-lines", search: "magnifying-glass-menu", web: "window-cursor", agent: "task", plan: "checklist", tool: "mcp" };
   const CHEV = '<span class="chev"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M5 6.5L8 9.5L11 6.5" stroke="currentColor"/></svg></span>';
   const svg = (name, size) => '<svg width="' + (size || 16) + '" height="' + (size || 16) + '" viewBox="0 0 20 20" fill="none" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
@@ -485,7 +506,7 @@ function client() {
   const atBottom = () => scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 80;
   let pinned = true;
   scroller.addEventListener("scroll", () => { pinned = atBottom(); latest.classList.toggle("show", !pinned); }, { passive: true });
-  latest.addEventListener("click", () => { pinned = true; scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" }); });
+  latest.addEventListener("click", () => { pinned = true; scroller.scrollTo({ top: scroller.scrollHeight, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" }); });
   const follow = () => { if (pinned) scroller.scrollTop = scroller.scrollHeight; };
 
   let phase = "";
@@ -493,10 +514,11 @@ function client() {
   let rows = new Map();
   let recent = []; // the agent's last raw output lines, shown if the run fails
 
-  // A reconnect replays the log, so the transcript starts over.
+  // Only a truncated log starts over. Reconnects append from the last event ID.
   function reset() {
     feed.replaceChildren();
     phase = ""; group = null; rows = new Map(); recent = [];
+    pinned = true;
   }
 
   function add(node) {
@@ -571,16 +593,34 @@ function client() {
         div.append(p);
       }
     });
+    const actions = el("div", "response-actions");
+    const copy = el("button", "icon-button copy");
+    copy.type = "button";
+    copy.title = "Copy response";
+    copy.setAttribute("aria-label", "Copy response");
+    copy.innerHTML = svg("copy");
+    copy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        copy.innerHTML = svg("check");
+        copy.setAttribute("aria-label", "Copied response");
+        activity.textContent = "Response copied.";
+        setTimeout(() => { copy.innerHTML = svg("copy"); copy.setAttribute("aria-label", "Copy response"); }, 1600);
+      } catch {
+        hint.textContent = "Couldn't copy. Select the response text to copy it.";
+      }
+    });
+    actions.append(copy);
+    div.append(actions);
     add(div);
   }
 
   function summarize(g) {
     const calls = [...g.querySelectorAll(".tool")];
-    const kinds = [...new Set(calls.map((call) => call.dataset.icon || "tool"))];
-    g.querySelector(".gtrig b").innerHTML = kinds.map((kind) => svg(TOOL_ICON[kind] || "mcp")).join("");
-    g.querySelector(".gtrig .n").textContent = calls.length;
-    g.querySelector(".gtrig").setAttribute("aria-label", calls.length + " tool calls");
-    g.querySelector(".gl").classList.toggle("shimmer", calls.some((call) => call.dataset.state === "running"));
+    const title = calls.length + (calls.length === 1 ? " tool call" : " tool calls");
+    g.querySelector(".gtrig .n").textContent = title;
+    const working = calls.some((call) => call.dataset.state === "running");
+    g.querySelector(".gtrig").setAttribute("aria-label", title + (working ? ", working" : ""));
   }
 
   function tool(item) {
@@ -588,7 +628,7 @@ function client() {
     if (!row) {
       if (!group) {
         const g = add(el("div", "group"));
-        g.innerHTML = '<button class="gtrig" type="button" aria-expanded="false"><span class="gl"><b></b><span class="n"></span></span>' + CHEV + '</button><div class="rows" hidden></div>';
+        g.innerHTML = '<button class="gtrig" type="button" aria-expanded="false"><span class="n"></span>' + CHEV + '</button><div class="rows" hidden></div>';
         group = g;
       }
       row = el("div", "tool");
@@ -597,7 +637,7 @@ function client() {
       rows.set(item.id, row);
     }
     if (item.icon) { row.dataset.icon = item.icon; row.querySelector(".label").innerHTML = svg(TOOL_ICON[item.icon] || "mcp"); }
-    if (item.title !== undefined) { row.dataset.title = item.title; row.querySelector(".sub").textContent = item.title; }
+    if (item.title !== undefined) { row.dataset.title = item.title; row.querySelector(".sub").textContent = item.title; row.querySelector(".sub").title = item.title; }
     if (item.meta) {
       const arg = row.querySelector(".arg");
       arg.replaceChildren();
@@ -632,8 +672,8 @@ function client() {
       // A diff or a plan says more than the tool's own reply, unless the call failed.
       if (item.output && (!detail.childElementCount || item.state === "error")) detail.append(el("pre", "out", item.output));
     }
-    row.querySelector(".label").classList.toggle("shimmer", row.dataset.state === "running");
     row.classList.toggle("has-detail", detail.childElementCount > 0);
+    row.querySelector(".trig").setAttribute("aria-label", (row.dataset.title || "Tool call") + ", " + (row.dataset.state || "running"));
     detail.hidden = !row.classList.contains("open");
     summarize(row.closest(".group"));
   }
@@ -678,8 +718,14 @@ function client() {
   });
 
   const events = new EventSource("/_handoff/events");
+  const failedHint = "The agent stopped with an error. Check its latest output.";
+  events.addEventListener("reset", reset);
   events.addEventListener("log", (e) => {
-    JSON.parse(e.data).forEach(entry);
+    const items = JSON.parse(e.data);
+    items.forEach(entry);
+    if (items.some((item) => item.kind === "text")) {
+      activity.textContent = feed.querySelectorAll(".prose").length + " agent responses. Latest response available.";
+    }
     follow();
   });
   events.addEventListener("status", (e) => {
@@ -687,18 +733,46 @@ function client() {
     const kind = state.startsWith("failed") ? "failed" : state;
     document.body.dataset.state = kind;
     document.getElementById("state").textContent = states[kind] || kind;
-    document.getElementById("indicator").title = states[kind] || kind;
+    if (kind === "failed") hint.textContent = failedHint;
+    else if (hint.textContent === failedHint) hint.textContent = "";
     if (title) { document.getElementById("title").textContent = title; document.title = title; }
     const link = document.getElementById("pr");
     if (pr) { link.href = pr; link.hidden = false; }
+    ready();
   });
-  events.onopen = () => { document.body.classList.remove("offline"); hint.textContent = ""; reset(); };
-  events.onerror = () => { document.body.classList.add("offline"); hint.textContent = "Reconnecting…"; };
+  events.onopen = () => { document.body.classList.remove("offline"); hint.textContent = document.body.dataset.state === "failed" ? failedHint : ""; ready(); };
+  events.onerror = () => { document.body.classList.add("offline"); hint.textContent = "Reconnecting…"; ready(); };
 
   const text = document.getElementById("text");
   const go = document.getElementById("go");
-  const grow = () => { text.style.height = "auto"; text.style.height = Math.min(Math.max(text.scrollHeight, 60), 180) + "px"; };
-  const ready = () => { go.disabled = !text.value.trim(); };
+  let sending = false;
+  const expand = document.getElementById("expand");
+  const panel = document.querySelector(".panel");
+  const setExpanded = (open) => {
+    panel.classList.toggle("composing", open);
+    expand.setAttribute("aria-expanded", open);
+    expand.setAttribute("aria-label", open ? "Collapse composer" : "Expand composer");
+    expand.title = open ? "Collapse composer" : "Expand composer";
+    expand.innerHTML = svg(open ? "collapse" : "expand");
+    text.focus();
+    if (!open) { grow(); follow(); }
+  };
+  expand.addEventListener("click", () => setExpanded(!panel.classList.contains("composing")));
+  text.addEventListener("keydown", (e) => { if (e.key === "Escape" && panel.classList.contains("composing")) setExpanded(false); });
+  const grow = () => { text.style.height = "auto"; text.style.height = Math.min(Math.max(text.scrollHeight, 88), 180) + "px"; };
+  const ready = () => {
+    const draft = Boolean(text.value.trim());
+    const working = document.body.dataset.state === "running" && !document.body.classList.contains("offline");
+    const mode = sending ? "sending" : !draft && working ? "working" : "send";
+    go.disabled = sending || !draft;
+    if (go.dataset.mode !== mode) {
+      go.dataset.mode = mode;
+      go.innerHTML = svg(mode === "send" ? "send" : "working");
+      go.setAttribute("aria-label", mode === "sending" ? "Sending message" : mode === "working" ? "Agent working" : "Send message");
+      go.title = go.getAttribute("aria-label");
+    }
+    go.setAttribute("aria-busy", mode !== "send");
+  };
   text.addEventListener("input", grow);
   text.addEventListener("input", ready);
   ready();
@@ -706,20 +780,23 @@ function client() {
   document.getElementById("send").addEventListener("submit", async (e) => {
     e.preventDefault();
     const message = text.value.trim();
-    if (!message) return;
-    go.disabled = true;
+    if (!message || sending) return;
+    sending = true; ready();
     // Shows the message at once; the log confirms it when the agent picks it up.
     const bubble = add(el("p", "you pending", message));
     pinned = true; follow();
     try {
       const response = await fetch("/_handoff/message", { method: "POST", body: message });
       if (!response.ok) throw new Error((await response.json()).error);
-      text.value = ""; grow(); hint.textContent = "";
+      if (text.value.trim() === message) text.value = "";
+      grow(); hint.textContent = "";
+      activity.textContent = "Message queued for the agent.";
+      if (panel.classList.contains("composing")) setExpanded(false);
     } catch (error) {
       bubble.remove();
       hint.textContent = "Not sent: " + error.message;
     }
-    ready();
+    sending = false; ready();
   });
 }
 
