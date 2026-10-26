@@ -87,7 +87,9 @@ test(`watch viewer: mobile, desktop and live interactions (${browserName})`, { t
   assert.equal(new URL(page.url()).search, "", "key is removed from address");
   assert.equal(await page.locator("#title").textContent(), "Keep the mobile viewer in sync");
   await page.waitForFunction(() => document.querySelector("#state").textContent === "Getting ready");
-  assert.equal(await page.locator("#header .agent-name").textContent(), "Claude Code");
+  assert.equal(await page.locator("#header .agent-mark").getAttribute("aria-label"), "Claude Code");
+  assert.equal(await page.locator("#header .agent-mark").textContent(), "", "visible header uses the agent mark, not the name");
+  assert.ok((await page.locator("#header .agent-mark").boundingBox()).width <= 20);
   assert.equal(await page.locator("#send .agent-label, #send .run-state").count(), 0, "composer has no identity/status row");
   assert.equal(await page.locator("#state").getAttribute("class"), "sr", "run state stays available to screen readers without visible text");
   assert.equal(await page.locator("#go").getAttribute("data-mode"), "send", "idle control shows the paper plane");
@@ -101,6 +103,7 @@ test(`watch viewer: mobile, desktop and live interactions (${browserName})`, { t
   assert.equal(await page.locator(".tool .sub").first().evaluate((node) => getComputedStyle(node).color), "rgb(160, 160, 160)", "tool paths stay readable as evidence");
   const served = await page.content();
   assert.ok(!served.includes("M2.08334 12.0833") && !served.includes("M6.6665 8.33325"), "unused icon artwork is not shipped");
+  assert.ok(served.includes("#D97757"), "Claude mark uses the selected coral concept");
   assert.equal(await page.locator("#feed").getAttribute("aria-live"), null, "transcript is readable without announcing every tool update");
   assert.equal(await page.locator("#scroll").getAttribute("role"), "region");
   assert.match(await page.locator("#activity").textContent(), /2 agent responses/);

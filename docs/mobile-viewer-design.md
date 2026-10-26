@@ -19,10 +19,16 @@ fallback. OpenCode's own web app and the marketing site are unchanged.
 
 ## Adaptations for handoff
 
-Only functioning controls appear. The agent name sits at the top-left of the
-header, above the task title. A PR icon appears when a result is available.
-The lock and redundant agent and tool-summary icons are omitted. Unsupported
+Only functioning controls appear. A small agent mark sits at the top-left of
+the header, above the task title. A PR icon appears when a result is available.
+The lock and redundant tool-summary icons are omitted. Unsupported
 attachment, new-thread and model-switching controls are not shown.
+
+The agent marks are original color-coded representations, not official logos.
+Claude uses a coral terminal tile. Codex uses a blue-to-violet terminal tile
+with one pale node. Pi uses a three-color π mark, and OpenCode uses a
+monochrome square mark. Each name remains in the mark's accessible label and
+tooltip, and in the composer placeholder.
 
 Tool summaries use plain disclosure rows rather than bordered chips.
 Paths use readable muted text, and tighter spacing connects each tool to its

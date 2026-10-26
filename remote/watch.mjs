@@ -233,6 +233,16 @@ server.listen(PORT, process.env.WATCH_HOST || "0.0.0.0");
 
 function page() {
   const name = escapeHtml(label);
+  // Original color marks, not official logos. The name stays in the label.
+  const agentMarks = {
+    claude: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4" fill="#D97757"/><path d="m8.2 9.2 3 2.8-3 2.8m5.3.2h3" stroke="#211713" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    codex: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><defs><linearGradient id="agent-codex-gradient" x1="4" y1="3" x2="20" y2="21" gradientUnits="userSpaceOnUse"><stop stop-color="#AEB7FF"/><stop offset=".52" stop-color="#7187F2"/><stop offset="1" stop-color="#3541D8"/></linearGradient></defs><rect x="3" y="3" width="18" height="18" rx="4" fill="url(#agent-codex-gradient)"/><circle cx="17" cy="6.6" r="1.3" fill="#E4E9FF"/><path d="m8.2 9.2 3 2.8-3 2.8m5.3.2h3" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    pi: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5h16v4H4z" fill="#F09082"/><path d="M6.5 9H10v10H6.5z" fill="#4D9ABF"/><path d="M14 9h3.5v10H14z" fill="#F1BE58"/></svg>',
+    opencode: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2" fill="#ECE7E7"/><path d="M8 8h8v8H8z" fill="#211E1E"/><path d="M10 10h4v4h-4z" fill="#6B6666"/></svg>',
+  };
+  const agentMark = agentMarks[AGENT]
+    ? `<span class="agent-mark" role="img" aria-label="${name}" title="${name}">${agentMarks[AGENT]}</span>`
+    : `<span class="agent-name">${name}</span>`;
   const opencodeNote =
     AGENT === "opencode"
       ? `<p class="note">OpenCode's full app opens here once the agent starts. Reload in a moment.</p>`
@@ -277,6 +287,8 @@ header { flex: none; padding: env(safe-area-inset-top) env(safe-area-inset-right
 .bar { display: flex; align-items: center; gap: 4px; min-height: 60px; padding: 8px 6px 8px 16px; }
 .heading { flex: 1; min-width: 0; }
 .agent-name { display: block; color: var(--muted); font: 400 12px/18px var(--sans); }
+.agent-mark { display: inline-flex; width: 20px; height: 20px; margin-bottom: 2px; }
+.agent-mark svg { display: block; }
 .bar h1 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 14px/20px var(--sans); }
 .note { margin: 0 16px 12px; color: var(--muted); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -414,7 +426,7 @@ form:focus-within { box-shadow: inset 0 2px 0 var(--focus); }
 </head>
 <body data-state="warming">
 <header id="header">
-  <div class="bar"><div class="heading"><span class="agent-name">${name}</span><h1 id="title">${name} is getting ready</h1></div><a class="icon-button pr" id="pr" target="_blank" rel="noopener" aria-label="Open pull request" title="Open pull request" hidden><svg data-icon="git-pull-request"></svg></a></div>
+  <div class="bar"><div class="heading">${agentMark}<h1 id="title">${name} is getting ready</h1></div><a class="icon-button pr" id="pr" target="_blank" rel="noopener" aria-label="Open pull request" title="Open pull request" hidden><svg data-icon="git-pull-request"></svg></a></div>
   ${opencodeNote}
 </header>
 <div class="panel">
