@@ -19,7 +19,7 @@ WATCH_BROWSER=webkit npm run test:watch
 
 The site tests serve the generated files under `/agent-handoff/`. They check the same relative paths that GitHub Pages uses.
 
-The viewer starts when it enters view and pauses offscreen. Changes and Checks jump to those parts of the session. Reset starts over. Follow-up messages produce additional checks after the main task finishes.
+The desktop and phone apps start as they enter view and pause offscreen. Each has its own scrollable transcript, expandable tools, and message composer. Follow-up messages produce additional checks after the main task finishes.
 
 ## Refresh the screenshots
 
@@ -39,5 +39,6 @@ The captures include the desktop page, the mobile page at 390 × 844, and the ap
 | Mobile app | [App](images/landing-app-mobile.png) |
 | Session start | [Start](images/landing-live-start.png) |
 | Real-time playback | [Running](images/landing-live-running.png) |
+| Real-time phone playback | [Phone](images/landing-live-mobile-running.png) |
 | Failed regression check | [Failure](images/landing-live-failure.png) |
 | Completed session | [Result](images/landing-live-completed.png) |

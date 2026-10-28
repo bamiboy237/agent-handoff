@@ -143,8 +143,8 @@ pre.code { margin: 14px 0 20px; padding: 12px; overflow: auto; border: 1px solid
 .shell .res { border-top: 1px solid var(--border); background: var(--deep); color: var(--muted); }
 pre.out { margin: 0; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font: 440 13px/150% var(--mono); letter-spacing: -0.04px; }
 .tool[data-state="error"] pre.out { color: var(--danger); }
-.diff { border: 1px solid var(--border-strong); border-radius: 6px; overflow: hidden; font: 400 13px/20px var(--mono); max-height: 320px; overflow-y: auto; }
-.dl { display: flex; gap: 8px; padding: 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
+.diff { display: grid; grid-template-columns: minmax(100%, max-content); border: 1px solid var(--border-strong); border-radius: 6px; overflow: auto; font: 400 13px/20px var(--mono); max-height: 320px; }
+.dl { display: flex; gap: 8px; padding: 0 12px; white-space: pre; color: var(--text); }
 .dl i { flex: none; width: 1ch; font-style: normal; }
 .dl.add { background: rgba(107, 213, 134, 0.1); }
 .dl.add i { color: var(--success); }

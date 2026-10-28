@@ -65,29 +65,8 @@ export function previewConnection(session) {
     }, delay);
   }
 
-  function show(view) {
-    if (!["conversation", "changes", "checks"].includes(view)) return;
-    stop();
-    const target = session.views[view];
-    if (target) {
-      while (cursor <= target.through) append(session.timeline[cursor++]);
-      status();
-    }
-    const scroll = scroller();
-    if (view === "conversation") scroll.scrollTop = 0;
-    else {
-      const row = rowFor(target.tool);
-      expand(row);
-      if (row) scroll.scrollTop = row.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop - 16;
-    }
-    scroll.dispatchEvent(new Event("scroll"));
-    remaining = undefined;
-    schedule();
-  }
-
   window.addEventListener("message", (event) => {
     if (event.origin !== location.origin || event.source !== parent) return;
-    if (event.data?.type === "handoff-preview-view" && ready) show(event.data.view);
     if (event.data?.type === "handoff-preview-active") {
       active = event.data.active === true;
       if (!active) stop();
@@ -99,16 +78,11 @@ export function previewConnection(session) {
     schedule();
   });
 
-  setTimeout(async () => {
+  setTimeout(() => {
     ready = true;
     events.onopen?.();
     append(session.timeline[cursor++]);
     status();
-    const view = new URLSearchParams(location.search).get("view");
-    if (view) {
-      await document.fonts.ready;
-      show(view);
-    }
     schedule();
     parent.postMessage({ type: "handoff-preview-ready" }, location.origin);
   }, 0);

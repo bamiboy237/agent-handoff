@@ -6,7 +6,7 @@
     <title>agent-handoff</title>
     <meta name="description" content="Hand off your coding agent to the cloud." />
     <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#0e0e0e" />
+    <meta name="theme-color" content="#14120b" />
     <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
     <link rel="preload" href="fonts/geist-wght.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="styles.css" />
@@ -19,59 +19,25 @@
         <a class="brand" href="./" translate="no">
           <img src="assets/logo.svg" width="20" height="20" alt="" />agent-handoff
         </a>
-        <div class="nav-links">
-          <a href="#viewer">The viewer</a>
-          <a href="#agents">Agents</a>
-        </div>
-        <div class="nav-actions">
-          <a class="github-link" href="https://github.com/bamiboy237/agent-handoff">GitHub</a>
-          <a class="button button-small" href="#install">Install</a>
-        </div>
+        <a class="button button-small" href="#install">Install</a>
       </nav>
     </header>
 
     <main id="main" class="wrap" tabindex="-1">
       <section class="hero" aria-labelledby="hero-title">
-        <div class="hero-copy">
-          <h1 id="hero-title">Hand off your coding agent to the cloud.</h1>
-          <p>Your uncommitted changes go with it. Get a draft pull request when it finishes.</p>
-          <div class="hero-actions">
-            <a class="button" href="#install">Get started</a>
-            <a class="text-link" href="#viewer">Explore the viewer</a>
-          </div>
-        </div>
+        <h1 id="hero-title">Hand off your coding agent to the cloud.</h1>
       </section>
 
-      <section class="product" id="viewer" aria-labelledby="viewer-title">
-        <div class="product-intro">
-          <div>
-            <h2 id="viewer-title">Follow the work.</h2>
-          </div>
-          <div class="preview-actions">
-            <button class="reset-preview" type="button" data-reset-preview aria-label="Reset viewer" title="Reset viewer"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2.5 7a5.5 5.5 0 1 1 .8 4M2.5 2.5V7H7" stroke="currentColor" stroke-width="1.25"/></svg></button>
-            <a class="text-link open-viewer" href="preview.html" target="_blank" rel="noopener">Open viewer <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M9 2.5h4.5V7M13 3l-7 7M6.5 3H3v10h10V9.5" stroke="currentColor" stroke-width="1.25"/></svg></a>
-          </div>
-        </div>
-        <div class="workspace">
-          <aside class="work-rail" aria-label="Explore the task">
-            <div class="view-controls" role="group" aria-label="Inspect the work">
-              <button type="button" data-preview-view="conversation" aria-pressed="true">Transcript</button>
-              <button type="button" data-preview-view="changes" aria-pressed="false">Changes</button>
-              <button type="button" data-preview-view="checks" aria-pressed="false">Checks</button>
-            </div>
-          </aside>
-          <iframe id="app-preview" src="preview.html" title="Agent viewer: invoice webhook implementation and tests" allow="clipboard-write"></iframe>
-        </div>
-      </section>
+      <div class="workspace" id="viewer">
+        <iframe id="app-preview" data-app-preview src="preview.html" title="Invoice webhook implementation and tests" allow="clipboard-write"></iframe>
+      </div>
 
       <section class="mobile-feature" aria-labelledby="mobile-title">
         <div class="feature-copy">
-          <h2 id="mobile-title">The viewer on your phone.</h2>
+          <h2 id="mobile-title">Check in on your work, on the go</h2>
         </div>
         <div class="mobile-evidence">
-          <figure class="phone-shot">
-            <img src="assets/viewer-mobile.png" width="390" height="844" alt="Mobile viewer showing the webhook transaction diff and message composer." loading="lazy" />
-          </figure>
+          <iframe id="mobile-preview" data-app-preview src="preview.html" title="Mobile agent session" allow="clipboard-write"></iframe>
         </div>
       </section>
 

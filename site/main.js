@@ -1,24 +1,14 @@
-const preview = document.getElementById("app-preview");
-const viewButtons = document.querySelectorAll("[data-preview-view]");
-let visible = false;
-const syncVisibility = () => preview.contentWindow.postMessage({ type: "handoff-preview-active", active: visible }, location.origin);
-new IntersectionObserver(([entry]) => {
-  visible = entry.isIntersecting;
-  syncVisibility();
-}).observe(preview);
-window.addEventListener("message", (event) => {
-  if (event.origin === location.origin && event.source === preview.contentWindow && event.data?.type === "handoff-preview-ready") syncVisibility();
-});
-for (const button of viewButtons) {
-  button.addEventListener("click", () => {
-    for (const peer of viewButtons) peer.setAttribute("aria-pressed", String(peer === button));
-    preview.contentWindow.postMessage({ type: "handoff-preview-view", view: button.dataset.previewView }, location.origin);
+for (const preview of document.querySelectorAll("[data-app-preview]")) {
+  let visible = false;
+  const syncVisibility = () => preview.contentWindow.postMessage({ type: "handoff-preview-active", active: visible }, location.origin);
+  new IntersectionObserver(([entry]) => {
+    visible = entry.intersectionRatio >= 0.25;
+    syncVisibility();
+  }, { threshold: 0.25 }).observe(preview);
+  window.addEventListener("message", (event) => {
+    if (event.origin === location.origin && event.source === preview.contentWindow && event.data?.type === "handoff-preview-ready") syncVisibility();
   });
 }
-document.querySelector("[data-reset-preview]").addEventListener("click", () => {
-  for (const button of viewButtons) button.setAttribute("aria-pressed", String(button.dataset.previewView === "conversation"));
-  preview.src = "preview.html";
-});
 
 // Copy the install command. The copy icon turns into a check for a moment.
 for (const button of document.querySelectorAll("[data-copy]")) {

@@ -3,7 +3,6 @@ import { once } from "node:events";
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 import { chromium, webkit } from "playwright";
 import { renderWatchPage } from "../remote/watch-page.mjs";
 import { buildSite } from "./build-site.mjs";
@@ -12,6 +11,9 @@ import { session } from "./site-session.mjs";
 
 const browserName = process.env.WATCH_BROWSER || "chromium";
 const screenshotDir = process.env.SITE_SCREENSHOT_DIR;
+const transactionTime = session.timeline.slice(0, session.timeline.findLastIndex((step) =>
+  step.entries.some((item) => item.kind === "tool" && item.id === "atomic-write")) + 1)
+  .reduce((sum, step) => sum + step.after, 0);
 
 async function setup(t) {
   await buildSite();
@@ -27,6 +29,11 @@ async function setup(t) {
 async function freeze(page) {
   await page.clock.install({ time: new Date("2026-06-01T10:00:00Z") });
   await page.clock.pauseAt(new Date("2026-06-01T10:00:01Z"));
+}
+
+async function enterPreview(page, selector) {
+  await page.locator(selector).evaluate((node) => scrollTo(0, node.getBoundingClientRect().top + scrollY - 88));
+  await page.frameLocator(selector).locator('body[data-preview-active="true"]').waitFor();
 }
 
 async function capture(page, name, options = {}) {
@@ -127,7 +134,7 @@ test(`engineering session streams, pauses and answers follow-ups (${browserName}
   assert.deepEqual(errors, []);
 });
 
-test(`landing page, controls and mobile layout (${browserName})`, { timeout: 90_000 }, async (t) => {
+test(`desktop and mobile apps stream independently without a walkthrough (${browserName})`, { timeout: 90_000 }, async (t) => {
   const { browser, url } = await setup(t);
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1280 }, deviceScaleFactor: 1, reducedMotion: "reduce",
@@ -145,43 +152,76 @@ test(`landing page, controls and mobile layout (${browserName})`, { timeout: 90_
   await page.goto(url);
   await page.clock.runFor(100);
   const app = page.frameLocator("#app-preview");
+  const phone = page.frameLocator("#mobile-preview");
+  assert.equal(await page.locator(".nav a").count(), 2, "navigation has only the brand and Install");
+  assert.equal(await page.locator('a[href="#install"]').count(), 1, "one install action");
+  assert.equal(await page.getByRole("link", { name: /viewer/i }).count(), 0, "no repeated viewer links");
+  assert.equal(await page.getByRole("button", { name: /^(Transcript|Changes|Checks|Reset viewer)$/ }).count(), 0);
+  assert.equal(await page.getByRole("heading", { name: "Check in on your work, on the go", exact: true }).count(), 1);
+  assert.equal(await page.locator(".hero p, .hero a, .mobile-feature img").count(), 0);
   assert.equal(await app.locator("#title").textContent(), session.title);
   assert.equal(await app.locator(".tool").count(), 1);
-  await page.getByRole("button", { name: "Checks", exact: true }).click();
-  await app.locator('body[data-state="completed"]').waitFor();
-  assert.match(await app.locator('.tool[data-id="integration-green"] .res').textContent(), /7 passed/);
-  await page.getByRole("button", { name: "Changes", exact: true }).click();
+  await app.locator('body[data-preview-active="true"]').waitFor();
+  await app.locator("body").evaluate(() => document.fonts.ready);
+  await page.clock.runFor(100);
+  await page.clock.runFor(transactionTime);
   await app.locator('.tool[data-id="atomic-write"] .diff').waitFor({ state: "visible" });
   assert.ok(await app.locator('.tool[data-id="atomic-write"] .dl.add').first().evaluate((line) => {
     const diff = line.closest(".diff").getBoundingClientRect();
     const rect = line.getBoundingClientRect();
     return rect.top >= diff.top && rect.bottom <= diff.bottom;
-  }), "the change view opens on the new code");
-  assert.equal(await page.getByRole("button", { name: "Changes", exact: true }).getAttribute("aria-pressed"), "true");
+  }), "the new code opens as the work arrives, without a view switch");
   await app.locator("#text").fill("Keep this draft.");
   await app.getByRole("button", { name: "Expand composer" }).click();
   assert.equal(await app.locator("#expand").getAttribute("aria-expanded"), "true");
   await app.locator("#text").press("Escape");
   assert.equal(await app.locator("#text").inputValue(), "Keep this draft.");
-  const reset = page.waitForEvent("framenavigated", (frame) => frame.url().includes("/preview.html"));
-  await page.getByRole("button", { name: "Reset viewer" }).click();
-  await (await reset).waitForLoadState("load");
-  await page.clock.runFor(100);
-  assert.equal(await app.locator("body").getAttribute("data-state"), "running");
-  assert.equal(await app.locator(".you").count(), 1);
-  assert.equal(await app.locator(".tool").count(), 1);
-  assert.equal(await app.locator("#text").inputValue(), "");
+  await app.locator("#scroll").evaluate((node) => {
+    node.scrollTop = 0;
+    node.dispatchEvent(new Event("scroll"));
+  });
+  await page.clock.runFor(15_000);
+  assert.equal(await app.locator("body").getAttribute("data-state"), "completed");
+  assert.match(await app.locator('.tool[data-id="integration-green"] .res').textContent(), /7 passed/);
+  assert.equal(await app.locator("#scroll").evaluate((node) => node.scrollTop), 0, "new results leave the reader's place alone");
+  await app.locator("#text").fill("Check the signature.");
+  await app.getByRole("button", { name: "Send message", exact: true }).click();
+  await page.clock.runFor(6000);
+  assert.match(await app.locator('[data-id="reply-1-follow-signature"] .res').textContent(), /Database writes: 0/);
+  await page.setViewportSize({ width: 1440, height: 800 });
   await page.getByRole("heading", { name: "Install", exact: true }).scrollIntoViewIfNeeded();
   await page.clock.runFor(100);
   await app.locator('body[data-preview-active="false"]').waitFor();
-  const paused = await app.locator("#feed").textContent();
-  await page.clock.runFor(10_000);
-  assert.equal(await app.locator("#feed").textContent(), paused);
-  await page.locator("#app-preview").scrollIntoViewIfNeeded();
-  await page.clock.runFor(100);
-  await app.locator('body[data-preview-active="true"]').waitFor();
+  await phone.locator('body[data-preview-active="false"]').waitFor();
+  const pausedPhone = await phone.locator("#feed").textContent();
   await page.clock.runFor(5000);
-  assert.notEqual(await app.locator("#feed").textContent(), paused);
+  assert.equal(await phone.locator("#feed").textContent(), pausedPhone);
+
+  await page.setViewportSize({ width: 1440, height: 1280 });
+  await enterPreview(page, "#mobile-preview");
+  await page.clock.runFor(100);
+  await app.locator('body[data-preview-active="false"]').waitFor();
+  const desktopHistory = await app.locator("#feed").textContent();
+  await phone.locator("#text").fill("Check rollback again.");
+  await phone.getByRole("button", { name: "Send message", exact: true }).click();
+  await page.clock.runFor(50_000);
+  assert.equal(await phone.locator("body").getAttribute("data-state"), "completed");
+  assert.match(await phone.locator('[data-id="reply-1-follow-retry"] .res').textContent(), /After rollback: 0 receipts, 0 invoices, 0 outbox entries/);
+  assert.equal(await phone.locator('[data-id="reply-1-follow-signature"]').count(), 0, "each app owns its conversation");
+  assert.equal(await app.locator("#feed").textContent(), desktopHistory);
+  const scrollBox = await phone.locator("#scroll").boundingBox();
+  await page.mouse.move(scrollBox.x + 6, scrollBox.y + scrollBox.height / 2);
+  const parentScroll = await page.evaluate(() => scrollY);
+  const phoneScroll = await phone.locator("#scroll").evaluate((node) => node.scrollTop);
+  await page.mouse.wheel(0, -300);
+  await page.clock.runFor(100);
+  await page.waitForFunction((previous) =>
+    document.querySelector("#mobile-preview").contentDocument.getElementById("scroll").scrollTop < previous,
+  phoneScroll, { polling: 50 });
+  assert.ok(await phone.locator("#scroll").evaluate((node) => node.scrollTop) < phoneScroll, "the phone app accepts native scrolling");
+  assert.equal(await page.evaluate(() => scrollY), parentScroll, "reading the app does not move the landing page");
+  await phone.locator('.tool[data-id="atomic-write"] .trig').click();
+  await phone.locator('.tool[data-id="atomic-write"] .diff').waitFor({ state: "visible" });
 
   await page.getByRole("button", { name: "Copy install command" }).click();
   await page.waitForFunction(() => document.querySelector("[data-copy-status]").textContent !== "");
@@ -203,19 +243,34 @@ test(`landing page, controls and mobile layout (${browserName})`, { timeout: 90_
     await page.setViewportSize(viewport);
     await page.goto(url);
     await page.clock.runFor(100);
-    await page.getByRole("button", { name: "Changes", exact: true }).click();
+    await enterPreview(page, "#app-preview");
+    await app.locator("body").evaluate(() => document.fonts.ready);
+    await page.clock.runFor(100);
+    await page.clock.runFor(transactionTime);
     await app.locator('.tool[data-id="atomic-write"] .diff').waitFor({ state: "visible" });
     await page.evaluate(() => document.fonts.ready);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `page fits ${viewport.width}px`);
     assert.ok(await app.locator("body").evaluate(() => document.documentElement.scrollWidth <= innerWidth), `viewer fits ${viewport.width}px`);
     assert.equal(await app.locator("#text").evaluate((node) => getComputedStyle(node).fontSize), "16px");
+    assert.equal(await app.locator('.tool[data-id="atomic-write"] .dl.add').first().evaluate((node) => getComputedStyle(node).whiteSpace), "pre", "code keeps its indentation instead of wrapping into fragments");
+    if (viewport.width <= 390) {
+      assert.ok(await app.locator('.tool[data-id="atomic-write"] .diff').evaluate((node) => {
+        node.scrollLeft = 100;
+        return node.scrollLeft > 0;
+      }), "wide code scrolls within its diff");
+      assert.ok(await app.locator('.tool[data-id="atomic-write"] .dl').evaluateAll((lines) =>
+        lines.every((line) => line.offsetWidth === lines[0].offsetWidth)), "diff backgrounds span one shared code width");
+    }
     const small = await page.locator("a, button").evaluateAll((nodes) => nodes.filter((node) => {
       const rect = node.getBoundingClientRect();
       return rect.width && rect.height && (rect.width < 44 || rect.height < 44);
     }).map((node) => node.textContent.trim()));
     assert.deepEqual(small, []);
-    await page.locator(".phone-shot img").scrollIntoViewIfNeeded();
-    await page.locator(".phone-shot img").evaluate((image) => image.decode());
+    await enterPreview(page, "#mobile-preview");
+    assert.ok(await phone.locator("body").evaluate(() => document.documentElement.scrollWidth <= innerWidth), `phone app fits ${viewport.width}px`);
+    assert.equal(await phone.locator("#text").evaluate((node) => getComputedStyle(node).fontSize), "16px");
+    const phoneSize = await page.locator("#mobile-preview").boundingBox();
+    assert.ok(phoneSize.height > phoneSize.width * 2, "the app has a phone-sized viewport");
   }
 
   const mobilePage = await browser.newPage({
@@ -225,15 +280,14 @@ test(`landing page, controls and mobile layout (${browserName})`, { timeout: 90_
   await freeze(mobilePage);
   await mobilePage.goto(url);
   await mobilePage.clock.runFor(100);
-  const mobileApp = mobilePage.frameLocator("#app-preview");
-  await mobilePage.getByRole("button", { name: "Checks", exact: true }).tap();
-  await mobileApp.locator('body[data-state="completed"]').waitFor();
+  const mobileApp = mobilePage.frameLocator("#mobile-preview");
+  await enterPreview(mobilePage, "#mobile-preview");
   assert.equal(await mobilePage.evaluate(() => matchMedia("(pointer: coarse)").matches), true);
   await mobileApp.locator("#text").fill("Check retry rollback.");
   await mobileApp.locator("#text").press("Enter");
   assert.match(await mobileApp.locator("#text").inputValue(), /\n$/);
   await mobileApp.getByRole("button", { name: "Send message", exact: true }).tap();
-  await mobilePage.clock.runFor(6000);
+  await mobilePage.clock.runFor(50_000);
   assert.match(await mobileApp.locator(".prose").last().textContent(), /one invoice and one outbox entry/);
   assert.equal(await mobileApp.locator(".you.pending").count(), 0);
   assert.ok(!requests.some((request) => request.includes("/_handoff/")));
@@ -242,22 +296,32 @@ test(`landing page, controls and mobile layout (${browserName})`, { timeout: 90_
   assert.deepEqual(errors, []);
 
   if (screenshotDir) {
-    await mobilePage.goto(url + "preview.html?view=changes");
+    await mobilePage.goto(url + "preview.html");
     await mobilePage.clock.runFor(100);
+    await mobilePage.clock.runFor(transactionTime);
     await mobilePage.locator('.tool[data-id="atomic-write"] .diff').waitFor({ state: "visible" });
-    await mobilePage.screenshot({ path: fileURLToPath(new URL("../site/assets/viewer-mobile.png", import.meta.url)) });
     await capture(mobilePage, "landing-app-mobile");
     await page.goto(url);
     await page.clock.runFor(100);
-    await page.getByRole("button", { name: "Changes", exact: true }).click();
+    await app.locator('body[data-preview-active="true"]').waitFor();
+    await app.locator("body").evaluate(() => document.fonts.ready);
+    await page.clock.runFor(transactionTime);
     await app.locator('.tool[data-id="atomic-write"] .diff').waitFor({ state: "visible" });
+    await enterPreview(page, "#mobile-preview");
+    await app.locator('body[data-preview-active="false"]').waitFor();
+    await phone.locator("body").evaluate(() => document.fonts.ready);
+    await page.clock.runFor(transactionTime);
     await page.evaluate(() => scrollTo(0, 0));
+    await app.locator('body[data-preview-active="true"]').waitFor();
+    await phone.locator('body[data-preview-active="false"]').waitFor();
     await capture(page, "landing-desktop", { fullPage: true });
     await capture(page, "landing-desktop-preview");
     await mobilePage.goto(url);
     await mobilePage.clock.runFor(100);
-    await mobilePage.getByRole("button", { name: "Changes", exact: true }).tap();
-    await mobileApp.locator('.tool[data-id="atomic-write"] .diff').waitFor({ state: "visible" });
+    await enterPreview(mobilePage, "#app-preview");
+    await mobilePage.clock.runFor(transactionTime);
+    await enterPreview(mobilePage, "#mobile-preview");
+    await mobilePage.clock.runFor(transactionTime);
     await mobilePage.evaluate(() => scrollTo(0, 0));
     await capture(mobilePage, "landing-mobile", { fullPage: true });
     await capture(mobilePage, "landing-mobile-first");
@@ -269,17 +333,27 @@ test(`landing page, controls and mobile layout (${browserName})`, { timeout: 90_
   }
 });
 
-test(`preview progresses with the real browser clock (${browserName})`, { timeout: 30_000 }, async (t) => {
+test(`both previews progress with the real browser clock (${browserName})`, { timeout: 45_000 }, async (t) => {
   const { browser, url } = await setup(t);
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1280 }, reducedMotion: "reduce" });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" });
   await page.goto(url);
   const app = page.frameLocator("#app-preview");
   await app.locator('body[data-state="running"]').waitFor();
-  await page.locator("#app-preview").scrollIntoViewIfNeeded();
+  await enterPreview(page, "#app-preview");
+  await page.frameLocator("#mobile-preview").locator('body[data-preview-active="false"]').waitFor();
   assert.equal(await app.locator(".tool").count(), 1);
   await app.locator('.tool[data-id="reproduce"][data-state="error"]').waitFor({ timeout: 20_000 });
   await app.locator('.tool[data-id="migration"] .diff').waitFor({ state: "visible", timeout: 10_000 });
   assert.equal(await app.locator(".tool").count(), 3);
   assert.equal(await app.locator("body").getAttribute("data-state"), "running");
   if (screenshotDir) await page.locator(".workspace").screenshot({ path: join(screenshotDir, "landing-live-running.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await enterPreview(page, "#mobile-preview");
+  const phone = page.frameLocator("#mobile-preview");
+  assert.equal(await phone.locator(".tool").count(), 1, "the phone session waits until it is in view");
+  await phone.locator('.tool[data-id="reproduce"][data-state="error"]').waitFor({ timeout: 20_000 });
+  await phone.locator('.tool[data-id="migration"] .diff').waitFor({ state: "visible", timeout: 10_000 });
+  assert.equal(await phone.locator(".tool").count(), 3);
+  assert.equal(await phone.locator("body").getAttribute("data-state"), "running");
+  if (screenshotDir) await page.locator("#mobile-preview").screenshot({ path: join(screenshotDir, "landing-live-mobile-running.png") });
 });

@@ -144,10 +144,6 @@ const retryReply = {
 export const session = {
   title: "Make invoice webhooks safe to retry",
   timeline,
-  views: {
-    changes: { through: 15, tool: "atomic-write" },
-    checks: { through: timeline.length - 1, tool: "integration-green" },
-  },
   followUps: [
     {
       match: "signatur|secur|auth|invalid|payload",
