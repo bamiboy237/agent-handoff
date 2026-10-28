@@ -30,7 +30,7 @@ jobs:
       - run: npm run build
 
   watch-ui:
-    name: Watch viewer browser checks
+    name: Viewer and landing page browser checks
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -47,6 +47,9 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps ${{ matrix.browser }}
       - run: npm run test:watch
+        env:
+          WATCH_BROWSER: ${{ matrix.browser }}
+      - run: npm run test:site
         env:
           WATCH_BROWSER: ${{ matrix.browser }}
 

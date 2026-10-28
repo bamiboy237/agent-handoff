@@ -22,6 +22,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:watch": "node --test remote/watch.test.mjs",
     "preview:watch": "node scripts/watch-preview.mjs",
+    "build:site": "node scripts/build-site.mjs",
+    "test:site": "node --test scripts/site.test.mjs",
+    "preview:site": "node scripts/site-preview.mjs",
     "prepare": "npm run build"
   },
   "dependencies": {

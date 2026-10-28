@@ -15,7 +15,7 @@ import type { HandoffRecord, HandoffState } from "./contract.js";
 import { collectSandboxEnv } from "./credentials.js";
 import { createSnapshotCommit, pushSnapshot } from "./git-snapshot.js";
 import { sandboxAdapter } from "./sandboxes/sandbox.js";
-import { RUNNER_SCRIPT, TRANSCRIPT_SCRIPT, WATCH_SCRIPT, renderSetupScript } from "./setup.js";
+import { RUNNER_SCRIPT, TRANSCRIPT_SCRIPT, WATCH_PAGE_SCRIPT, WATCH_SCRIPT, renderSetupScript } from "./setup.js";
 import { type StartSignal, appendLog, readRecord, readStartSignal, updateRecord } from "./store.js";
 
 const START_WAIT_MS = 20 * 60_000;
@@ -135,6 +135,7 @@ async function run(id: string): Promise<void> {
       await sandboxes.exec(record.sandboxId!, `mkdir -p ${shellQuote(handoffDir())}`, 30);
       await upload("runner.sh", readFileSync(RUNNER_SCRIPT, "utf8"));
       await upload("watch.mjs", readFileSync(WATCH_SCRIPT, "utf8"));
+      await upload("watch-page.mjs", readFileSync(WATCH_PAGE_SCRIPT, "utf8"));
       await upload("transcript.mjs", readFileSync(TRANSCRIPT_SCRIPT, "utf8"));
       await upload("handoff.env", handoffEnv());
     });
