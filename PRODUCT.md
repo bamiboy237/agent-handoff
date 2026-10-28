@@ -29,8 +29,8 @@ It works with any agent that supports MCP (OpenCode, Claude Code, Codex, Pi) and
 - Uncommitted changes travel with the task through a temporary snapshot commit.
 - Prime Agent can start a handoff but cannot run in the sandbox yet.
 - The npm name `agent-handoff` belongs to another project, so installs run from GitHub.
-- Live progress viewing ("Can I check on it?") is not built yet.
-- The landing page in `site/` is static HTML, CSS, and vanilla JS with no build step, deployed to GitHub Pages.
+- The watch link shows the agent's transcript and tool output, and accepts follow-up messages from a phone.
+- The landing page in `site/` uses HTML, CSS, and vanilla JS. A Node build generates its embedded viewer from the app's shared renderer before GitHub Pages deploys it.
 
 ## Brand Commitments
 
@@ -41,7 +41,8 @@ It works with any agent that supports MCP (OpenCode, Claude Code, Codex, Pi) and
 ## Evidence on Hand
 
 - A working end-to-end handoff against Daytona with OpenCode, run on a throwaway repository.
-- No real screenshots or video of a handoff yet. The landing page demo is a re-creation of Claude Code and OpenCode, and it should be replaced with real footage later.
+- The landing page runs a webhook retry investigation through the watch viewer, with timed tool calls, code changes, failed tests, a correction, and follow-up messages.
+- Browser captures in `docs/images/landing-*.png` show the landing page and viewer at mobile and desktop sizes.
 - No users, testimonials, benchmarks, or pricing exist. Do not invent them.
 
 ## Product Principles
